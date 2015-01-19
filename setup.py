@@ -15,7 +15,7 @@ print data_files
 
 setup(
     name='pyKriging',
-    version='0.0.2',
+    version='0.0.2a',
     zip_safe = False,
     packages=find_packages(),
     package_data={'pyKriging': ['sampling_plans/*']},
