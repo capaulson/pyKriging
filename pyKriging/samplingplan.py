@@ -3,12 +3,16 @@ import numpy as np
 import math as m
 import os
 import pickle
+import pyKriging
 
 
 class samplingplan():
     def __init__(self,k=2):
         self.samplingplan = []
         self.k = k
+        self.path = os.path.dirname(pyKriging.__file__)
+        self.path = self.path+'/sampling_plans/'
+
 
     def rlh(self,n,Edges=0):
         """
@@ -61,9 +65,12 @@ class samplingplan():
             """
             if not generation:
                 # Check for existing LHC sampling plans
-                if os.path.isfile('lhc_{0}_{1}.pkl'.format(self.k, n)):
-                    X = pickle.load(open('lhc_{0}_{1}.pkl'.format(self.k, n), 'r'))
+                if os.path.isfile('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n)):
+                    X = pickle.load(open('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n), 'r'))
                     return X
+                else:
+                    print self.path
+                    print 'SP not found on disk, generating it now.'
 
             #list of qs to optimise Phi_q for
             q = [1,2,5,10,20,50,100]

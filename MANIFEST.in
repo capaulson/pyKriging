@@ -1,0 +1,2 @@
+include pyKriging/*.py
+recursive-include pyKriging/sampling_plans *
