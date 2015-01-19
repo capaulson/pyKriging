@@ -6,7 +6,7 @@ Created on Tue Dec 23 09:16:40 2014
 """
 import numpy as np
 from matplotlib import pyplot as plt
-from pyKrige.krige import kriging
+from pyKriging.krige import kriging
 
 
 def calculate_SCVR(X, y, name, optimiser='pso', plot=0):

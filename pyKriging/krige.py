@@ -8,7 +8,7 @@ import matplotlib
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
 import copy
-from pyKrige import samplingplan
+from pyKriging import samplingplan
 
 
 class kriging(matrixops):

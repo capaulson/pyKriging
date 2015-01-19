@@ -2,15 +2,13 @@ from setuptools import setup, find_packages # Always prefer setuptools over dist
 
 setup(
     name='pyKriging',
-    version='0.0.3',
+    version='0.0.1',
     packages=find_packages(),
-    url='',
+    url='www.pykriging.com',
     license='',
     author='Chris Paulson',
-    author_email='cp1m11@soton.ac.uk',
-    description='',
-    install_requires=['scipy', 'numpy', 'pyOpt', 'dill'],
-
-
+    author_email='capaulson@gmail.com',
+    description='A Kriging Toolbox for Python',
+    install_requires=['scipy', 'numpy', 'dill'],
 
 )

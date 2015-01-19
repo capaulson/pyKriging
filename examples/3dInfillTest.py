@@ -9,7 +9,7 @@ sp = samplingplan(3)
 X = sp.optimallhc(30)
 
 ## Next, we define the problem we would like to solve
-testfun = pyKrige.testfunctions2d().squared
+testfun = pyKriging.testfunctions2d().squared
 y = testfun(X)
 
 ## Now that we have our initial data, we can create an instance of a kriging model
