@@ -95,7 +95,7 @@ class samplingplan():
             #and the Latin hypercube with the best space-filling properties is
 
             X = X3D[:,:,Index[1]]
-            pickle.dump(X, open('lhc_{0}_{1}.pkl'.format(self.k, n), 'wb'))
+            pickle.dump(X, open('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n), 'wb'))
             return X
 
 
