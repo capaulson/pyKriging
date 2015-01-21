@@ -10,7 +10,7 @@ X = sp.optimallhc(20)
 # Next, we define the problem we would like to solve
 # testfun = pyKriging.testfunctions2d().paulson1
 # testfun = pyKriging.testfunctions2d().squared
-testfun = pyKrige.testfunctions2d().branin
+testfun = pyKriging.testfunctions2d().branin
 y = testfun(X)
 
 print 'Setting up the Kriging Model'
@@ -19,7 +19,6 @@ k = kriging(X, y, testfunction=testfun, name='simple')
 k.train()
 print 'Done with training, moving on to infill'
 
-# Now, you can add infill points
 numberiter = 5
 for i in range(numberiter):
     print 'Infill iteration {0} of {1}....'.format(i + 1, numberiter)

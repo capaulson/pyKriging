@@ -276,7 +276,7 @@ class kriging(matrixops):
         if self.k==2:
             samplePoints = zip(*self.X)
             # Create a set of data to plot
-            plotgrid = 75
+            plotgrid = 151
             x = np.linspace(0, 1, num=plotgrid)
             y = np.linspace(0, 1, num=plotgrid)
             X, Y = np.meshgrid(x, y)
@@ -296,7 +296,9 @@ class kriging(matrixops):
                 zt = self.testfunction( np.array(zip(np.ravel(X), np.ravel(Y))) )
                 ZT = zt.reshape(X.shape)
 
-
+            #Plot real world values
+            X = (X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
+            Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
             fig = plt.figure(figsize=(8,6))
             ax = fig.add_subplot(221)
             # contour_levels = np.linspace(min(zt), max(zt),50)
