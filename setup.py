@@ -22,7 +22,7 @@ setup(
     author='Chris Paulson',
     author_email='capaulson@gmail.com',
     description='A Kriging Toolbox for Python',
-    install_requires=['scipy', 'numpy', 'dill', 'matplotlib'],
+    install_requires=['scipy', 'numpy', 'dill', 'matplotlib','inspyred'],
 
 
 )

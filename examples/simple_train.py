@@ -1,4 +1,6 @@
 __author__ = 'cpaulson'
+import sys
+sys.path.insert(0,'..')
 import pyKriging
 from pyKriging.krige import kriging
 from pyKriging.samplingplan import samplingplan
@@ -17,15 +19,16 @@ print 'Setting up the Kriging Model'
 # Now that we have our initial data, we can create an instance of a kriging model
 k = kriging(X, y, testfunction=testfun, name='simple')
 k.train()
-print 'Done with training, moving on to infill'
 
-# numberiter = 5
-# for i in range(numberiter):
-#     print 'Infill iteration {0} of {1}....'.format(i + 1, numberiter)
-#     newpoints = k.infill(1)
-#     for point in newpoints:
-#         k.addPoint(point, testfun(point)[0])
-#     k.train()
+numberiter = 5
+for i in range(numberiter):
+    print 'Infill iteration {0} of {1}....'.format(i + 1, numberiter)
+    newpoints = k.infill(1)
+
+    for point in newpoints:
+        k.addPoint(point, testfun(point)[0])
+    k.train()
 
 # And plot the results
+print 'Now plotting results...'
 k.plot()

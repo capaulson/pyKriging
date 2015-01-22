@@ -16,7 +16,7 @@ y = testfun(X)
 k = kriging(X, y, testfunction=testfun)
 
 ## The model is then trained
-k.train(optimizer='pso')
+k.train_new()
 
 # It's typically beneficial to add additional points based on the results of the initial training
 # The infill method can be  used for this
@@ -24,17 +24,17 @@ k.train(optimizer='pso')
 print 'Finished Model Training'
 for i in range(10):
     print 'Infill itteration {0}'.format((i+1))
-    infillPoints = k.infill(5)
+    infillPoints = k.infill_new(5)
 
     ## Evaluate the infill points and add them back to the Kriging model
     for point in infillPoints:
         k.addPoint(point, testfun(point)[0])
 
     ## Retrain the model with the new points added in to the model
-    k.train()
+    k.train_new()
 
 # Save the trained model
-pickle.dump(k, open('trainedModel.pkl', 'wb'))
+pickle.dump(k,  open('trainedModel.pkl', 'wb'))
 
 ## Once the training of the model is complete, we can plot the results
 k.plot()
