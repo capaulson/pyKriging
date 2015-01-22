@@ -1,4 +1,6 @@
 __author__ = 'cpaulson'
+import sys
+sys.path.insert(0,'..')
 import pyKriging
 from pyKriging.krige import kriging
 from pyKriging.samplingplan import samplingplan
@@ -10,7 +12,7 @@ X = sp.optimallhc(20)
 # Next, we define the problem we would like to solve
 # testfun = pyKriging.testfunctions2d().paulson1
 # testfun = pyKriging.testfunctions2d().squared
-testfun = pyKriging.testfunctions2d().paulson
+testfun = pyKriging.testfunctions2d().branin
 y = testfun(X)
 
 print 'Setting up the Kriging Model'

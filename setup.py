@@ -13,7 +13,7 @@ data_files = [path.relpath(file, datadir) for file in data_files]
 
 setup(
     name='pyKriging',
-    version='0.0.5',
+    version='0.0.3',
     zip_safe = False,
     packages=find_packages(),
     package_data={'pyKriging': ['sampling_plans/*']},
