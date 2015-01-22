@@ -13,7 +13,7 @@ data_files = [path.relpath(file, datadir) for file in data_files]
 
 setup(
     name='pyKriging',
-    version='0.0.3',
+    version='0.0.5',
     zip_safe = False,
     packages=find_packages(),
     package_data={'pyKriging': ['sampling_plans/*']},
@@ -22,7 +22,7 @@ setup(
     author='Chris Paulson',
     author_email='capaulson@gmail.com',
     description='A Kriging Toolbox for Python',
-    install_requires=['scipy', 'numpy', 'dill', 'matplotlib'],
+    install_requires=['scipy', 'numpy', 'dill', 'matplotlib','inspyred'],
 
 
 )

@@ -6,7 +6,7 @@ import dill as pickle
 
 ## The Kriging model starts by defining a sampling plan, we use an optimal Lattin Hypercube here
 sp = samplingplan(3)
-X = sp.optimallhc(30)
+X = sp.optimallhc(90)
 
 ## Next, we define the problem we would like to solve
 testfun = pyKriging.testfunctions2d().squared
@@ -16,7 +16,7 @@ y = testfun(X)
 k = kriging(X, y, testfunction=testfun)
 
 ## The model is then trained
-k.train(optimizer='pso')
+k.train()
 
 # It's typically beneficial to add additional points based on the results of the initial training
 # The infill method can be  used for this
@@ -34,7 +34,7 @@ for i in range(10):
     k.train()
 
 # Save the trained model
-pickle.dump(k, open('trainedModel.pkl', 'wb'))
+pickle.dump(k,  open('trainedModel.pkl', 'wb'))
 
 ## Once the training of the model is complete, we can plot the results
 k.plot()

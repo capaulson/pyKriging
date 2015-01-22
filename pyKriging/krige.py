@@ -3,13 +3,16 @@ __author__ = 'chrispaulson'
 import numpy as np
 from matrixops import matrixops
 import copy
-from pyOpt import Optimization, ALPSO, NSGA2, SLSQP, MIDACO
+# from pyOpt import Optimization, ALPSO, NSGA2, SLSQP, MIDACO
 import matplotlib
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
-import copy
 from pyKriging import samplingplan
-
+import inspyred
+from random import Random
+from time import time
+from inspyred import ec
+from inspyred.ec import terminators
 
 class kriging(matrixops):
     def __init__(self, X, y, testfunction=None, name='', **kwargs):
@@ -28,6 +31,12 @@ class kriging(matrixops):
         self.sp = samplingplan.samplingplan()
         self.updateData()
         self.updateModel()
+
+        self.thetamin = 1e-4
+        self.thetamax = 100
+        self.pmin = 1
+        self.pmax = 2
+
         matrixops.__init__(self)
     
     def normX(self,X):
@@ -72,30 +81,63 @@ class kriging(matrixops):
         self.updateData()
         self.updateModel()
 
-    def fittingObjective(self, values):
-        fail = 0
-        f=10000
-        for i in range(self.k):
-            self.theta[i] = values[i]
-        for i in range(self.k):
-            self.pl[i] = values[i+(self.k)]
-        try:
-	        self.updatePsi()
-        except Exception, err:
-            # print Exception, err
-            #print 'Failure in updatePsi, failing the entry'
-            f = 1000
-            fail = 1
-        try:
-            self.neglikelihood()
-            f=self.NegLnLike
-        except Exception,e:
-            print 'Failure in NegLNLike, failing the run'
-            print Exception,e
-            f = 1000
-            fail = 1
-        g = [-10.0]
-        return f, g, fail
+    # def fittingObjective(self, values):
+        #fittingObjective for pyOpt verison
+    #     fail = 0
+    #     f=10000
+    #     for i in range(self.k):
+    #         self.theta[i] = values[i]
+    #     for i in range(self.k):
+    #         self.pl[i] = values[i+(self.k)]
+    #     try:
+	 #        self.updatePsi()
+    #     except Exception, err:
+    #         # print Exception, err
+    #         #print 'Failure in updatePsi, failing the entry'
+    #         f = 1000
+    #         fail = 1
+    #     try:
+    #         self.neglikelihood()
+    #         f=self.NegLnLike
+    #     except Exception,e:
+    #         print 'Failure in NegLNLike, failing the run'
+    #         print Exception,e
+    #         f = 1000
+    #         fail = 1
+    #     g = [-10.0]
+    #     return f, g, fail
+
+    def fittingObjective(self,candidates, args):
+        fitness = []
+        for entry in candidates:
+            f=10000
+            for i in range(self.k):
+                self.theta[i] = entry[i]
+            for i in range(self.k):
+                self.pl[i] = entry[i+(self.k)]
+            try:
+                self.updatePsi()
+            except Exception, err:
+                # print Exception, err
+                # print 'Failure in updatePsi, failing the entry'
+                f = 1000
+            try:
+                self.neglikelihood()
+                f=self.NegLnLike
+            except Exception,e:
+                print 'Failure in NegLNLike, failing the run'
+                print Exception,e
+                f = 1000
+            fitness.append(f)
+        return fitness
+
+    def generate_population(self,random, args):
+        size = args.get('num_inputs', None)
+        bounder = args["_ec"].bounder
+        chromosome = []
+        for lo, hi in zip(bounder.lower_bound, bounder.upper_bound):
+            chromosome.append(random.uniform(lo, hi))
+        return chromosome
 
     def update(self, values):
         for i in range(self.k):
@@ -129,16 +171,53 @@ class kriging(matrixops):
         # print X, self.predict_normalized(X), self.inversenormy(self.predict_normalized(X))
         return self.predicterr_normalized(X)
 
-    def errorObjective_normalized(self, values):
-        fail = 0
-        f = 1000
-        try:
-            f=-1*self.predicterr_normalized(values)
-        except:
-            print 'error prediction failed'
-            fail = 1
-        g = [-10.0]*3
-        return f, g, fail
+    # def errorObjective_normalized(self, values):
+    #     fail = 0
+    #     f = 1000
+    #     try:
+    #         f=-1*self.predicterr_normalized(values)
+    #     except:
+    #         print 'error prediction failed'
+    #         fail = 1
+    #     g = [-10.0]*3
+    #     return f, g, fail
+
+    # def infill(self, points, method='error'):
+    #     # Infill using pyOpt
+    #     ## We'll be making non-permanent modifications to self.X and self.y here, so lets make a copy just in case
+    #     initX = np.copy(self.X)
+    #     inity = np.copy(self.y)
+    #
+    #     ## This array will hold the new values we add
+    #     returnValues = np.zeros([points,self.k],dtype=float)
+    #
+    #     for i in range(points):
+    #         opt_prob1 = Optimization('InFillPSO', self.errorObjective_normalized)
+    #         for k in range(self.k):
+    #             opt_prob1.addVar('{0}'.format(k),'c',lower=0.00, upper=1, value=.5001)
+    #
+    #
+    #         pso1 = ALPSO()
+    #         pso1.setOption('SwarmSize',200)
+    #         pso1.setOption('maxOuterIter',1000)
+    #         pso1.setOption('stopCriteria',1)
+    #         # pso1.setOption('dtol',1e-1)
+    #         pso1(opt_prob1)
+    #
+    #         newpoint = np.zeros(self.k)
+    #
+    #         for j in range(self.k):
+    #             newpoint[j] = opt_prob1.solution(0)._variables[j].value
+    #         returnValues[i][:] = self.inversenormX(newpoint)
+    #         self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
+    #         del(opt_prob1)
+    #         del(pso1)
+
+    def infill_objective(self,candidates, args):
+        fitness = []
+        for entry in candidates:
+            fitness.append(-1*self.predicterr_normalized(entry))
+        return fitness
 
     def infill(self, points, method='error'):
         ## We'll be making non-permanent modifications to self.X and self.y here, so lets make a copy just in case
@@ -147,28 +226,24 @@ class kriging(matrixops):
 
         ## This array will hold the new values we add
         returnValues = np.zeros([points,self.k],dtype=float)
-
         for i in range(points):
-            opt_prob1 = Optimization('InFillPSO', self.errorObjective_normalized)
-            for k in range(self.k):
-                opt_prob1.addVar('{0}'.format(k),'c',lower=0.00, upper=1, value=.5001)
-
-
-            pso1 = ALPSO()
-            pso1.setOption('SwarmSize',200)
-            pso1.setOption('maxOuterIter',1000)
-            pso1.setOption('stopCriteria',1)
-            # pso1.setOption('dtol',1e-1)
-            pso1(opt_prob1)
-
-            newpoint = np.zeros(self.k)
-
-            for j in range(self.k):
-                newpoint[j] = opt_prob1.solution(0)._variables[j].value
+            rand = Random()
+            rand.seed(int(time()))
+            ea = inspyred.swarm.PSO(Random())
+            ea.terminator = terminators.evaluation_termination
+            ea.topology = inspyred.swarm.topologies.ring_topology
+            final_pop = ea.evolve(generator=self.generate_population,
+                                  evaluator=self.infill_objective,
+                                  pop_size=100,
+                                  maximize=False,
+                                  bounder=ec.Bounder([0]*self.k,[1]*self.k),
+                                  max_evaluations=3000,
+                                  neighborhood_size=10,
+                                  num_inputs=self.k)
+            final_pop.sort(reverse=True)
+            newpoint = final_pop[0].candidate
             returnValues[i][:] = self.inversenormX(newpoint)
             self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
-            del(opt_prob1)
-            del(pso1)
 
         self.X = np.copy(initX)
         self.y = np.copy(inity)
@@ -177,66 +252,92 @@ class kriging(matrixops):
         self.updateModel()
         return returnValues
 
-    def train(self,optimizer='pso'):
+    # def train(self,optimizer='pso'):
+    #     # Used with pyOpt
+    #     self.updateData()
+    #     self.updateModel()
+    #     #Define the optimization problem for training the kriging model
+    #     opt_prob = Optimization('Surrogate Test', self.fittingObjective)
+    #     for i in range(self.k):
+    #         opt_prob.addVar('theta%d'%i,'c',lower=1e-4,upper=1e2,value=self.theta[i])
+    #     for i in range(self.k):
+    #         opt_prob.addVar('pl%d'%i,'c',lower=1.,upper=2.,value=self.pl[i])
+    #     opt_prob.addObj('f')
+    #     opt_prob.addCon('g1', 'i')
+    #
+    #     if optimizer=='pso':
+    #         optimizer = ALPSO()
+    #         optimizer.setOption('SwarmSize',120)
+    #         optimizer.setOption('maxOuterIter',200)
+    #         optimizer.setOption('maxInnerIter',20)
+    #         optimizer.setOption('stopIters',20)
+    #         optimizer.setOption('vinit',1.5)
+    #         # optimizer.setOption('dtol',1.0)
+    #         optimizer.setOption('stopCriteria',1)
+    #         optimizer.setOption('filename', '{0}Results.log'.format(self.name))
+    #
+    #     if optimizer=='ga':
+    #         optimizer = NSGA2()
+    #         optimizer.setOption('PopSize', (4*50))
+    #
+    #     while True:
+    #         try:
+    #             self.trainingOptimizer(optimizer,opt_prob)
+    #         except:
+    #             print 'Error traning Model, restarting the optimizer with a larger population'
+    #             if optimizer=='pso':
+    #                 optimizer.setOption('SwarmSize',300)
+    #                 optimizer.setOption('maxOuterIter',100)
+    #                 optimizer.setOption('stopCriteria',1)
+    #             if optimizer=='ga':
+    #                 optimizer.setOption('PopSize', 200)
+    #         else:
+    #             break
+
+    def train(self):
         self.updateData()
         self.updateModel()
-        #Define the optimization problem for training the kriging model
-        opt_prob = Optimization('Surrogate Test', self.fittingObjective)
+        lowerBound = [self.thetamin]*self.k + [self.pmin]*self.k
+        upperBound = [self.thetamax]*self.k + [self.pmax]*self.k
+        rand = Random()
+        rand.seed(int(time()))
+        ea = inspyred.swarm.PSO(Random())
+        ea.terminator = terminators.evaluation_termination
+        ea.topology = inspyred.swarm.topologies.ring_topology
+        final_pop = ea.evolve(generator=self.generate_population,
+                              evaluator=self.fittingObjective,
+                              pop_size=200,
+                              maximize=False,
+                              bounder=ec.Bounder(lowerBound, upperBound),
+                              max_evaluations=3000,
+                              neighborhood_size=25,
+                              num_inputs=self.k)
+        # Sort and print the best individual, who will be at index 0.
+        final_pop.sort(reverse=True)
+        newValues = final_pop[0].candidate
         for i in range(self.k):
-            opt_prob.addVar('theta%d'%i,'c',lower=1e-4,upper=1e2,value=self.theta[i])
+            self.theta[i] = newValues[i]
         for i in range(self.k):
-            opt_prob.addVar('pl%d'%i,'c',lower=1.,upper=2.,value=self.pl[i])
-        opt_prob.addObj('f')
-        opt_prob.addCon('g1', 'i')
-
-        if optimizer=='pso':
-            optimizer = ALPSO()
-            optimizer.setOption('SwarmSize',120)
-            optimizer.setOption('maxOuterIter',200)
-            optimizer.setOption('maxInnerIter',20)
-            optimizer.setOption('stopIters',20)
-            optimizer.setOption('vinit',1.5)
-            # optimizer.setOption('dtol',1.0)
-            optimizer.setOption('stopCriteria',1)
-            optimizer.setOption('filename', '{0}Results.log'.format(self.name))
-
-        if optimizer=='ga':
-            optimizer = NSGA2()
-            optimizer.setOption('PopSize', (4*50))
-
-        while True:
-            try:
-                self.trainingOptimizer(optimizer,opt_prob)
-            except:
-                print 'Error traning Model, restarting the optimizer with a larger population'
-                if optimizer=='pso':
-                    optimizer.setOption('SwarmSize',300)
-                    optimizer.setOption('maxOuterIter',100)
-                    optimizer.setOption('stopCriteria',1)
-                if optimizer=='ga':
-                    optimizer.setOption('PopSize', 200)
-            else:
-                break
-
-
-
-    def trainingOptimizer(self, optimizer, opt_prob):
-        #Run the optimizer
-        # print 'running the global optimizer'
-        optimizer(opt_prob)
-
-        # Run a local optimization to refine the solution
-        midaco = MIDACO()
-        midaco(opt_prob.solution(0))
-
-        # print 'done with global optimizer'
-        for i in range(self.k):
-            self.theta[i] = opt_prob.solution(0).solution(0)._variables[i].value
-        for i in range(self.k):
-            self.pl[i] = opt_prob.solution(0).solution(0)._variables[i+(self.k)].value
+            self.pl[i] = newValues[i+(self.k)]
         self.updateModel()
-        del(optimizer)
-        del(opt_prob)
+
+    # def trainingOptimizer(self, optimizer, opt_prob):
+    #     #Run the optimizer
+    #     # print 'running the global optimizer'
+    #     optimizer(opt_prob)
+    #
+    #     # Run a local optimization to refine the solution
+    #     midaco = MIDACO()
+    #     midaco(opt_prob.solution(0))
+    #
+    #     print 'done with global optimizer'
+    #     for i in range(self.k):
+    #         self.theta[i] = opt_prob.solution(0).solution(0)._variables[i].value
+    #     for i in range(self.k):
+    #         self.pl[i] = opt_prob.solution(0).solution(0)._variables[i+(self.k)].value
+    #     self.updateModel()
+    #     del(optimizer)
+    #     del(opt_prob)
 
     def plot(self, labels=False):
         if self.k == 3:
@@ -246,7 +347,7 @@ class kriging(matrixops):
             if self.testfunction:
                 truthFig = mlab.figure(figure='test')
             dx = 1
-            pts = 15j
+            pts = 25j
             X,Y,Z = np.mgrid[0:dx:pts, 0:dx:pts, 0:dx:pts]
             scalars = np.zeros(X.shape)
             errscalars = np.zeros(X.shape)
@@ -276,7 +377,7 @@ class kriging(matrixops):
         if self.k==2:
             samplePoints = zip(*self.X)
             # Create a set of data to plot
-            plotgrid = 151
+            plotgrid = 61
             x = np.linspace(0, 1, num=plotgrid)
             y = np.linspace(0, 1, num=plotgrid)
             X, Y = np.meshgrid(x, y)
@@ -299,22 +400,24 @@ class kriging(matrixops):
             #Plot real world values
             X = (X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
             Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
+            spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
+            spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
             fig = plt.figure(figsize=(8,6))
             ax = fig.add_subplot(221)
             # contour_levels = np.linspace(min(zt), max(zt),50)
             contour_levels = 15
             CS = plt.contourf(X,Y,Z,contour_levels)
-            plt.plot(samplePoints[0],samplePoints[1],'ow')
+            plt.plot(spx, spy,'ow')
             plt.colorbar()
 
             if self.testfunction:
                 CS = plt.contour(X,Y,ZT,contour_levels,colors='k')
-            plt.plot(samplePoints[0],samplePoints[1], 'ow')
+            plt.plot(spx, spy,'ow')
 
             ax = fig.add_subplot(222)
             CS = plt.contourf(X,Y,Ze, contour_levels)
             plt.colorbar()
-            plt.plot(samplePoints[0],samplePoints[1],'ow')
+            plt.plot(spx, spy,'ow')
 
             ax = fig.add_subplot(212, projection='3d')
             # fig = plt.gcf()
