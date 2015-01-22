@@ -299,22 +299,24 @@ class kriging(matrixops):
             #Plot real world values
             X = (X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
             Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
+            spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
+            spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
             fig = plt.figure(figsize=(8,6))
             ax = fig.add_subplot(221)
             # contour_levels = np.linspace(min(zt), max(zt),50)
             contour_levels = 15
             CS = plt.contourf(X,Y,Z,contour_levels)
-            plt.plot(samplePoints[0],samplePoints[1],'ow')
+            plt.plot(spx, spy,'ow')
             plt.colorbar()
 
             if self.testfunction:
                 CS = plt.contour(X,Y,ZT,contour_levels,colors='k')
-            plt.plot(samplePoints[0],samplePoints[1], 'ow')
+            plt.plot(spx, spy,'ow')
 
             ax = fig.add_subplot(222)
             CS = plt.contourf(X,Y,Ze, contour_levels)
             plt.colorbar()
-            plt.plot(samplePoints[0],samplePoints[1],'ow')
+            plt.plot(spx, spy,'ow')
 
             ax = fig.add_subplot(212, projection='3d')
             # fig = plt.gcf()

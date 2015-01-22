@@ -19,13 +19,13 @@ k = kriging(X, y, testfunction=testfun, name='simple')
 k.train()
 print 'Done with training, moving on to infill'
 
-numberiter = 5
-for i in range(numberiter):
-    print 'Infill iteration {0} of {1}....'.format(i + 1, numberiter)
-    newpoints = k.infill(1)
-    for point in newpoints:
-        k.addPoint(point, testfun(point)[0])
-    k.train()
+# numberiter = 5
+# for i in range(numberiter):
+#     print 'Infill iteration {0} of {1}....'.format(i + 1, numberiter)
+#     newpoints = k.infill(1)
+#     for point in newpoints:
+#         k.addPoint(point, testfun(point)[0])
+#     k.train()
 
 # And plot the results
 k.plot()
