@@ -171,48 +171,6 @@ class kriging(matrixops):
         # print X, self.predict_normalized(X), self.inversenormy(self.predict_normalized(X))
         return self.predicterr_normalized(X)
 
-    # def errorObjective_normalized(self, values):
-    #     fail = 0
-    #     f = 1000
-    #     try:
-    #         f=-1*self.predicterr_normalized(values)
-    #     except:
-    #         print 'error prediction failed'
-    #         fail = 1
-    #     g = [-10.0]*3
-    #     return f, g, fail
-
-    # def infill(self, points, method='error'):
-    #     # Infill using pyOpt
-    #     ## We'll be making non-permanent modifications to self.X and self.y here, so lets make a copy just in case
-    #     initX = np.copy(self.X)
-    #     inity = np.copy(self.y)
-    #
-    #     ## This array will hold the new values we add
-    #     returnValues = np.zeros([points,self.k],dtype=float)
-    #
-    #     for i in range(points):
-    #         opt_prob1 = Optimization('InFillPSO', self.errorObjective_normalized)
-    #         for k in range(self.k):
-    #             opt_prob1.addVar('{0}'.format(k),'c',lower=0.00, upper=1, value=.5001)
-    #
-    #
-    #         pso1 = ALPSO()
-    #         pso1.setOption('SwarmSize',200)
-    #         pso1.setOption('maxOuterIter',1000)
-    #         pso1.setOption('stopCriteria',1)
-    #         # pso1.setOption('dtol',1e-1)
-    #         pso1(opt_prob1)
-    #
-    #         newpoint = np.zeros(self.k)
-    #
-    #         for j in range(self.k):
-    #             newpoint[j] = opt_prob1.solution(0)._variables[j].value
-    #         returnValues[i][:] = self.inversenormX(newpoint)
-    #         self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
-    #         del(opt_prob1)
-    #         del(pso1)
-
     def infill_objective(self,candidates, args):
         fitness = []
         for entry in candidates:
@@ -252,48 +210,6 @@ class kriging(matrixops):
         self.updateModel()
         return returnValues
 
-    # def train(self,optimizer='pso'):
-    #     # Used with pyOpt
-    #     self.updateData()
-    #     self.updateModel()
-    #     #Define the optimization problem for training the kriging model
-    #     opt_prob = Optimization('Surrogate Test', self.fittingObjective)
-    #     for i in range(self.k):
-    #         opt_prob.addVar('theta%d'%i,'c',lower=1e-4,upper=1e2,value=self.theta[i])
-    #     for i in range(self.k):
-    #         opt_prob.addVar('pl%d'%i,'c',lower=1.,upper=2.,value=self.pl[i])
-    #     opt_prob.addObj('f')
-    #     opt_prob.addCon('g1', 'i')
-    #
-    #     if optimizer=='pso':
-    #         optimizer = ALPSO()
-    #         optimizer.setOption('SwarmSize',120)
-    #         optimizer.setOption('maxOuterIter',200)
-    #         optimizer.setOption('maxInnerIter',20)
-    #         optimizer.setOption('stopIters',20)
-    #         optimizer.setOption('vinit',1.5)
-    #         # optimizer.setOption('dtol',1.0)
-    #         optimizer.setOption('stopCriteria',1)
-    #         optimizer.setOption('filename', '{0}Results.log'.format(self.name))
-    #
-    #     if optimizer=='ga':
-    #         optimizer = NSGA2()
-    #         optimizer.setOption('PopSize', (4*50))
-    #
-    #     while True:
-    #         try:
-    #             self.trainingOptimizer(optimizer,opt_prob)
-    #         except:
-    #             print 'Error traning Model, restarting the optimizer with a larger population'
-    #             if optimizer=='pso':
-    #                 optimizer.setOption('SwarmSize',300)
-    #                 optimizer.setOption('maxOuterIter',100)
-    #                 optimizer.setOption('stopCriteria',1)
-    #             if optimizer=='ga':
-    #                 optimizer.setOption('PopSize', 200)
-    #         else:
-    #             break
-
     def train(self):
         self.updateData()
         self.updateModel()
@@ -302,16 +218,19 @@ class kriging(matrixops):
         rand = Random()
         rand.seed(int(time()))
         ea = inspyred.swarm.PSO(Random())
-        ea.terminator = terminators.evaluation_termination
-        ea.topology = inspyred.swarm.topologies.ring_topology
+        ea.terminator = terminators.average_fitness_termination
+        ea.topology = inspyred.swarm.topologies.star_topology
+        ea.observer = inspyred.ec.observers.stats_observer
         final_pop = ea.evolve(generator=self.generate_population,
                               evaluator=self.fittingObjective,
-                              pop_size=200,
+                              pop_size=50,
                               maximize=False,
                               bounder=ec.Bounder(lowerBound, upperBound),
-                              max_evaluations=3000,
+                              max_evaluations=20000,
                               neighborhood_size=25,
-                              num_inputs=self.k)
+                              num_inputs=self.k,
+                              tolerance=0.01,
+                              min_diversity=.01)
         # Sort and print the best individual, who will be at index 0.
         final_pop.sort(reverse=True)
         newValues = final_pop[0].candidate
@@ -320,24 +239,6 @@ class kriging(matrixops):
         for i in range(self.k):
             self.pl[i] = newValues[i+(self.k)]
         self.updateModel()
-
-    # def trainingOptimizer(self, optimizer, opt_prob):
-    #     #Run the optimizer
-    #     # print 'running the global optimizer'
-    #     optimizer(opt_prob)
-    #
-    #     # Run a local optimization to refine the solution
-    #     midaco = MIDACO()
-    #     midaco(opt_prob.solution(0))
-    #
-    #     print 'done with global optimizer'
-    #     for i in range(self.k):
-    #         self.theta[i] = opt_prob.solution(0).solution(0)._variables[i].value
-    #     for i in range(self.k):
-    #         self.pl[i] = opt_prob.solution(0).solution(0)._variables[i+(self.k)].value
-    #     self.updateModel()
-    #     del(optimizer)
-    #     del(opt_prob)
 
     def plot(self, labels=False):
         if self.k == 3:
@@ -394,7 +295,7 @@ class kriging(matrixops):
 
             if self.testfunction:
                 # Setup the truth function
-                zt = self.testfunction( np.array(zip(np.ravel(X), np.ravel(Y))) )
+                zt = self.testfunction( np.array(zip(np.ravel((X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]), np.ravel((Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]))) )
                 ZT = zt.reshape(X.shape)
 
             #Plot real world values

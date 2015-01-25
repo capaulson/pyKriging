@@ -23,7 +23,7 @@ cd['neglnlike']=[]
 
 ## The Kriging model starts by defining a sampling plan, we use an optimal Lattin Hypercube here
 sp = samplingplan(2)
-X = sp.optimallhc(9)
+X = sp.optimallhc(10)
 
 #Create our RH sampling plan for monitoring model value convergence
 points2sample = 200
@@ -33,7 +33,7 @@ for i in range(points2sample):
     testPointresults.append([])
 
 ## Next, we define the problem we would like to solve
-testfun = pyKrige.testfunctions2d().paulson
+testfun = pyKriging.testfunctions2d().paulson
 y = testfun(X)
 
 ## Now that we have our initial data, we can create an instance of a kriging model

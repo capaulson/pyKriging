@@ -2,6 +2,7 @@ __author__ = 'cpaulson'
 import pyKriging
 from pyKriging.krige import kriging
 from pyKriging.samplingplan import samplingplan
+import pylab
 
 # The Kriging model starts by defining a sampling plan, we use an optimal Latin Hypercube here
 sp = samplingplan(2)
