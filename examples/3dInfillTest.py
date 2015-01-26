@@ -6,7 +6,7 @@ import dill as pickle
 
 ## The Kriging model starts by defining a sampling plan, we use an optimal Lattin Hypercube here
 sp = samplingplan(3)
-X = sp.optimallhc(90)
+X = sp.optimallhc(30)
 
 ## Next, we define the problem we would like to solve
 testfun = pyKriging.testfunctions.squared
@@ -24,7 +24,7 @@ k.train()
 print 'Finished Model Training'
 for i in range(5):
     print 'Infill itteration {0}'.format((i+1))
-    infillPoints = k.infill(20)
+    infillPoints = k.infill(5)
 
     ## Evaluate the infill points and add them back to the Kriging model
     for point in infillPoints:
