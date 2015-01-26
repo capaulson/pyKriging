@@ -33,7 +33,7 @@ for i in range(points2sample):
     testPointresults.append([])
 
 ## Next, we define the problem we would like to solve
-testfun = pyKriging.testfunctions2d().paulson
+testfun = pyKriging.testfunctions.paulson1
 y = testfun(X)
 
 ## Now that we have our initial data, we can create an instance of a kriging model

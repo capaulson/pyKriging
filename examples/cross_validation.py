@@ -6,37 +6,40 @@ from pyKriging.testfunctions import testfunctions2d
 from pyKriging.utilities import mse, splitArrays
 
 sp = samplingplan()
-X = sp.optimallhc(16)
-t = testfunctions2d()
+X = sp.optimallhc(10)
+t = testfunctions()
 y = t.branin(X)
-k = kriging(X,y, optimizer='ga')
-k.train(optimizer='ga')
+k = kriging(X,y, testfunction=t.branin)
+k.train()
 
 for l in range(5):
-    mseArray = []
-    for i in splitArrays(k,5):
+    msemeanArray = []
+    msestdArray = []
+    for i in splitArrays(k,6):
         testk = kriging( i[0], i[1] )
         testk.train()
-        for j in range(len(i[2])):
-            mseArray.append(mse(i[3][j], testk.predict( i[2][j] )))
+        msemean, msestd = testk.calcuatemeanMSE()
+        msemeanArray.append(msemean)
+        msestdArray.append(msestd)
         del(testk)
-
-    print k.n, np.mean(mseArray), np.std(mseArray)
+    print msemeanArray
+    print k.n, np.mean(msemeanArray), np.std(msestdArray)
 
     infillPoints = k.infill(5)
     ## Evaluate the infill points and add them back to the Kriging model
     for point in infillPoints:
         k.addPoint(point, t.branin(point))
     ## Retrain the model with the new points added in to the model
-    k.train(optimizer='ga')
+    k.train()
 
 mseArray = []
 for i in splitArrays(k,5):
     testk = kriging( i[0], i[1] )
     testk.train()
-    for j in range(len(i[2])):
-        mseArray.append(mse(i[3][j], testk.predict( i[2][j] )))
+    msemean, msestd = testk.calcuatemeanMSE()
+    msemeanArray.append(msemean)
+    msestdArray.append(msestd)
     del(testk)
 
-print k.n, np.mean(mseArray), np.std(mseArray)
+print k.n, np.mean(msemeanArray), np.std(msestdArray)
 k.plot()

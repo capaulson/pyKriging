@@ -1,7 +1,7 @@
 __author__ = 'chrispaulson'
 import numpy as np
 
-class testfunctions2d():
+class testfunctions():
     def linear(self, X):
         try:
             X.shape[1]
@@ -110,8 +110,28 @@ class testfunctions2d():
         y = X[:,1]
         return (np.sin(x*hz))/((x+.2)) + (np.cos(y*hz))/((y+.2))
 
+    def stybtang(self,X):
+        try:
+            X.shape[1]
+        except:
+            X = np.array([X])
+        d = X.shape[1]
+        y = []
+        for entry in X:
+            sum = 0
+            for i in range(d):
+                xi = entry[i]
+                new = np.power(xi,4) - 16*np.power(xi,2) + 5*xi
+                sum = sum + new
+
+            y.append(sum/2)
+        return y
+
+
+
 if __name__=='__main__':
-    a = testfunctions2d()
+    a = testfunctions()
     print a.squared([1,1,1])
     print a.squared([[1,1,1],[2,2,2]])
     print a.cubed([[1,1,1],[2,2,2]])
+    print a.stybtang([[1,1,1],[2,2,2]])

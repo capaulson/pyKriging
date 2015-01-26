@@ -188,14 +188,14 @@ class kriging(matrixops):
             rand = Random()
             rand.seed(int(time()))
             ea = inspyred.swarm.PSO(Random())
-            ea.terminator = terminators.evaluation_termination
+            ea.terminator = self.no_improvement_termination
             ea.topology = inspyred.swarm.topologies.ring_topology
             final_pop = ea.evolve(generator=self.generate_population,
                                   evaluator=self.infill_objective,
                                   pop_size=100,
                                   maximize=False,
                                   bounder=ec.Bounder([0]*self.k,[1]*self.k),
-                                  max_evaluations=3000,
+                                  max_evaluations=20000,
                                   neighborhood_size=10,
                                   num_inputs=self.k)
             final_pop.sort(reverse=True)
@@ -210,6 +210,41 @@ class kriging(matrixops):
         self.updateModel()
         return returnValues
 
+    def no_improvement_termination(self, population, num_generations, num_evaluations, args):
+        """Return True if the best fitness does not change for a number of generations of if the max number
+        of evaluations is exceeded.
+
+        This function keeps track of the current best fitness and compares it to
+        the best fitness in previous generations. Whenever those values are the
+        same, it begins a generation count. If that count exceeds a specified
+        number, the terminator returns True.
+
+        .. Arguments:
+           population -- the population of Individuals
+           num_generations -- the number of elapsed generations
+           num_evaluations -- the number of candidate solution evaluations
+           args -- a dictionary of keyword arguments
+
+        Optional keyword arguments in args:
+
+        - *max_generations* -- the number of generations allowed for no change in fitness (default 10)
+
+        """
+        max_generations = args.setdefault('max_generations', 15)
+        previous_best = args.setdefault('previous_best', None)
+        max_evaluations = args.setdefault('max_evaluations', len(population))
+        current_best = np.around(max(population).fitness, decimals=4)
+        if previous_best is None or previous_best != current_best:
+            args['previous_best'] = current_best
+            args['generation_count'] = 0
+            return ((False) or (num_evaluations >= max_evaluations))
+        else:
+            if args['generation_count'] >= max_generations:
+                return True
+            else:
+                args['generation_count'] += 1
+                return ((False) or (num_evaluations >= max_evaluations))
+
     def train(self):
         self.updateData()
         self.updateModel()
@@ -218,19 +253,17 @@ class kriging(matrixops):
         rand = Random()
         rand.seed(int(time()))
         ea = inspyred.swarm.PSO(Random())
-        ea.terminator = terminators.average_fitness_termination
+        ea.terminator = self.no_improvement_termination
         ea.topology = inspyred.swarm.topologies.star_topology
-        ea.observer = inspyred.ec.observers.stats_observer
+        # ea.observer = inspyred.ec.observers.stats_observer
         final_pop = ea.evolve(generator=self.generate_population,
                               evaluator=self.fittingObjective,
-                              pop_size=50,
+                              pop_size=75,
                               maximize=False,
                               bounder=ec.Bounder(lowerBound, upperBound),
-                              max_evaluations=20000,
+                              max_evaluations=15000,
                               neighborhood_size=25,
-                              num_inputs=self.k,
-                              tolerance=0.01,
-                              min_diversity=.01)
+                              num_inputs=self.k)
         # Sort and print the best individual, who will be at index 0.
         final_pop.sort(reverse=True)
         newValues = final_pop[0].candidate

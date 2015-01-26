@@ -9,7 +9,7 @@ sp = samplingplan(3)
 X = sp.optimallhc(90)
 
 ## Next, we define the problem we would like to solve
-testfun = pyKriging.testfunctions2d().squared
+testfun = pyKriging.testfunctions.squared
 y = testfun(X)
 
 ## Now that we have our initial data, we can create an instance of a kriging model
@@ -22,9 +22,9 @@ k.train()
 # The infill method can be  used for this
 # In this example, we will add nine points in three batches. The model gets trained after each stage
 print 'Finished Model Training'
-for i in range(10):
+for i in range(5):
     print 'Infill itteration {0}'.format((i+1))
-    infillPoints = k.infill(5)
+    infillPoints = k.infill(20)
 
     ## Evaluate the infill points and add them back to the Kriging model
     for point in infillPoints:

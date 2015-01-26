@@ -7,7 +7,7 @@ from pyKriging.samplingplan import samplingplan
 sp = samplingplan(2)
 X = sp.optimallhc(11)
 ## Next, we define the problem we would like to solve
-testfun = pyKriging.testfunctions2d().branin
+testfun = pyKriging.testfunctions().branin
 y = testfun(X)
 
 
