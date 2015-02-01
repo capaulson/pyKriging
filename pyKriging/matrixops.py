@@ -25,19 +25,12 @@ class matrixops():
         self.Psi = np.zeros((self.n,self.n), dtype=np.float)
         self.one = np.ones(self.n)
         self.psi = np.zeros((self.n,1))
-        # self.updateData()
         newPsi = np.exp(-np.sum(self.theta*np.power(self.distance,self.pl), axis=2))
         self.Psi = np.triu(newPsi,1)
-        # #
-        # for i in xrange(self.n):
-        #     for j in xrange(i+1,self.n):
-        #         self.Psi[i,j]=np.exp(-np.sum(self.theta*np.power(np.abs((self.X[i]-self.X[j])),self.pl)))
         self.Psi = self.Psi + self.Psi.T + np.mat(eye(self.n))+np.multiply(np.mat(eye(self.n)),np.spacing(1))
         self.U = np.linalg.cholesky(self.Psi)
-        # self.U = np.matrix(self.U.T)
         self.U = self.U.T
 
-    ## The regression case, uses self.lambda instad of
     def regupdatePsi(self):
         self.Psi = np.zeros((self.n,self.n), dtype=np.float)
         self.one = np.ones(self.n)
@@ -48,11 +41,6 @@ class matrixops():
         self.U = np.linalg.cholesky(self.Psi)
         self.U = np.matrix(self.U.T)
 
-    def corr(self, x1, x2, theta, pl):
-        return np.exp(-1*np.sum(theta*np.abs(x1-x2)**pl))
-
-    def corr1(self, theta, pl):
-        return np.exp(-np.sum(theta*self.distance**pl, axis=2))
 
     def neglikelihood(self):
         self.LnDetPsi=2*np.sum(np.log(np.abs(np.diag(self.U))))

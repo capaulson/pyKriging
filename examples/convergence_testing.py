@@ -24,16 +24,20 @@ cd['neglnlike']=[]
 ## The Kriging model starts by defining a sampling plan, we use an optimal Lattin Hypercube here
 sp = samplingplan(2)
 X = sp.optimallhc(10)
+XTest = sp.rlh(500)
 
+# X = (X * 10)-5
 #Create our RH sampling plan for monitoring model value convergence
-points2sample = 200
+points2sample = 500
 testPoints = sp.rlh(points2sample)
+# testPoints = (testPoints * 10) -5
 testPointresults = []
 for i in range(points2sample):
     testPointresults.append([])
 
 ## Next, we define the problem we would like to solve
-testfun = pyKriging.testfunctions.paulson1
+# testfun = pyKriging.testfunctions().paulson1
+testfun = pyKriging.testfunctions().stybtang_norm
 y = testfun(X)
 
 ## Now that we have our initial data, we can create an instance of a kriging model
@@ -62,7 +66,7 @@ cd['iter'].append(0)
 ## It's typically beneficial to add additional points based on the results of the initial training
 ## The infill method can be  used for this
 ## In this example, we will add nine points in three batches. The model gets trained after each stage
-for i in range(30):
+for i in range(50):
     infillPoints = k.infill(1)
 
     ## Evaluate the infill points and add them back to the Kriging model
@@ -76,6 +80,7 @@ for i in range(30):
     #     k.train()
     #     print 'loop'
     k.train()
+    # k.saveFigure(name='converge_infill_iter_{0}.png'.format(i))
 
     results = k.calcuatemeanMSE(points=testPoints)
     cd['msemean'].append(results[0])
@@ -103,12 +108,12 @@ k.plot()
 #     # print np.mean(np.abs(testPointresults[i]- testfun(testPoints[i])[0])/testfun(testPoints[i])[0])
 #     plt.plot(  range(len(testPointresults[i])), (testPointresults[i]- testfun(testPoints[i])[0])/testfun(testPoints[i])[0])
 # plt.show()
-print cd
-print testPointresults
+# print cd
+# print testPointresults
 gradResults = []
 for i in testPointresults:
     gradResults.append(np.gradient(i))
-print gradResults
+# print gradResults
 
 grads = np.mean(gradResults,axis=0)
 gradsstd = np.std(gradResults, axis=0)

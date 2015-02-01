@@ -1,4 +1,4 @@
-__author__ = 'chrispaulson'
+from __future__ import division
 import numpy as np
 
 class testfunctions():
@@ -124,8 +124,41 @@ class testfunctions():
                 new = np.power(xi,4) - 16*np.power(xi,2) + 5*xi
                 sum = sum + new
 
-            y.append(sum/2)
-        return y
+            y.append(sum/2.)
+        return  np.array(y)
+
+    def stybtang_norm(self,X):
+        try:
+            X.shape[1]
+        except:
+            X = np.array([X])
+        X = (X *10)-5
+        d = X.shape[1]
+        y = []
+        for entry in X:
+            sum = 0
+            for i in range(d):
+                xi = entry[i]
+                new = np.power(xi,4) - 16*np.power(xi,2) + 5*xi
+                sum = sum + new
+
+            y.append(sum/2.)
+        return  np.array(y)
+
+    def curretal88exp(self,X):
+        try:
+            X.shape[1]
+        except:
+            X = np.array([X])
+        x1 = X[:,0]
+        x2 = X[:,1]
+
+        fact1 = 1 - np.exp(-1/(2*x2))
+        fact2 = 2300*np.power(x1,3) + 1900*np.power(x1,2) + 2092*x1 + 60
+        fact3 = 100*np.power(x1,3) + 500*np.power(x1,2) + 4*x1 + 20
+
+        return (fact1 * fact2/fact3)
+
 
 
 
@@ -135,3 +168,5 @@ if __name__=='__main__':
     print a.squared([[1,1,1],[2,2,2]])
     print a.cubed([[1,1,1],[2,2,2]])
     print a.stybtang([[1,1,1],[2,2,2]])
+    print a.curretal88exp([[1,1,1],[2,2,2]])
+    print a.zhou98([[1,1,1],[2,2,2]])
