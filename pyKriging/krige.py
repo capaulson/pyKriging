@@ -32,7 +32,7 @@ class kriging(matrixops):
         self.updateModel()
 
         self.thetamin = 1e-3
-        self.thetamax = 25
+        self.thetamax = 100
         self.pmin = 1
         self.pmax = 2
 
@@ -94,13 +94,13 @@ class kriging(matrixops):
                 self.theta[i] = entry[i]
             for i in range(self.k):
                 self.pl[i] = entry[i + self.k]
-            self.updateModel()
             try:
+                self.updateModel()
                 self.neglikelihood()
                 f = self.NegLnLike
             except Exception, e:
-                print 'Failure in NegLNLike, failing the run'
-                print Exception, e
+                # print 'Failure in NegLNLike, failing the run'
+                # print Exception, e
                 f = 1000
             fitness.append(f)
         return fitness
@@ -124,9 +124,9 @@ class kriging(matrixops):
         try:
             self.updatePsi()
         except Exception, err:
-            pass
+            # pass
             # print Exception, err
-            # raise Exception("bad params")
+            raise Exception("bad params")
 
     def predict(self, X):
         '''
@@ -212,10 +212,10 @@ class kriging(matrixops):
         - *max_generations* -- the number of generations allowed for no change in fitness (default 10)
 
         """
-        max_generations = args.setdefault('max_generations', 15)
+        max_generations = args.setdefault('max_generations', 100)
         previous_best = args.setdefault('previous_best', None)
-        max_evaluations = args.setdefault('max_evaluations', len(population))
-        current_best = np.around(max(population).fitness, decimals=3)
+        max_evaluations = args.setdefault('max_evaluations', 30000)
+        current_best = np.around(max(population).fitness, decimals=4)
         if previous_best is None or previous_best != current_best:
             args['previous_best'] = current_best
             args['generation_count'] = 0
@@ -227,27 +227,39 @@ class kriging(matrixops):
                 args['generation_count'] += 1
                 return False or (num_evaluations >= max_evaluations)
 
-    def train(self):
+    def train(self, optimizer='pso'):
         self.updateData()
         # self.updateModel()
         lowerBound = [self.thetamin] * self.k + [self.pmin] * self.k
         upperBound = [self.thetamax] * self.k + [self.pmax] * self.k
         rand = Random()
         rand.seed(int(time()))
-        ea = inspyred.swarm.PSO(Random())
-        ea.terminator = self.no_improvement_termination
-        ea.topology = inspyred.swarm.topologies.star_topology
-        # ea.observer = inspyred.ec.observers.stats_observer
-        final_pop = ea.evolve(generator=self.generate_population,
-                              evaluator=self.fittingObjective,
-                              pop_size=75,
-                              maximize=False,
-                              bounder=ec.Bounder(lowerBound, upperBound),
-                              max_evaluations=15000,
-                              neighborhood_size=25,
-                              num_inputs=self.k)
-        # Sort and print the best individual, who will be at index 0.
-        final_pop.sort(reverse=True)
+        if optimizer is 'pso':
+            ea = inspyred.swarm.PSO(Random())
+            ea.terminator = self.no_improvement_termination
+            ea.topology = inspyred.swarm.topologies.star_topology
+            # ea.observer = inspyred.ec.observers.stats_observer
+            final_pop = ea.evolve(generator=self.generate_population,
+                                  evaluator=self.fittingObjective,
+                                  pop_size=75,
+                                  maximize=False,
+                                  bounder=ec.Bounder(lowerBound, upperBound),
+                                  max_evaluations=15000,
+                                  neighborhood_size=25,
+                                  num_inputs=self.k)
+            # Sort and print the best individual, who will be at index 0.
+            final_pop.sort(reverse=True)
+        elif optimizer is 'ga':
+            ea = inspyred.ec.GA(Random())
+            ea.terminator = self.no_improvement_termination
+            final_pop = ea.evolve(generator=self.generate_population,
+                                  evaluator=self.fittingObjective,
+                                  pop_size=150,
+                                  maximize=False,
+                                  bounder=ec.Bounder(lowerBound, upperBound),
+                                  max_evaluations=30000,
+                                  num_elites=0,
+                                  mutation_rate=.2)
         for entry in final_pop:
             newValues = entry.candidate
             for i in range(self.k):
