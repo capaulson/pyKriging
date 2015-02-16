@@ -11,24 +11,32 @@ X = sp.optimallhc(10)
 testfun = pyKriging.testfunctions().branin
 y = testfun(X)
 
-print 'Setting up the Kriging Model'
-
 # Now that we have our initial data, we can create an instance of a kriging model
-k = kriging(X, y, testfunction=testfun, name='simple', testPoints=300)
+print 'Setting up the Kriging Model'
+k = kriging(X, y, testfunction=testfun, name='simple_ei', testPoints=300)
 k.train(optimizer='pso')
 k.snapshot()
 
-
+# Infill five points based on the expected improvement criterion
 for i in range(5):
-    newpoints = k.infill(2)
+    newpoints = k.infill(1, method='ei')
     for point in newpoints:
         print point
         k.addPoint(point, testfun(point)[0])
     k.train(optimizer='pso')
     k.snapshot()
 
-# #And plot the results
+#Add a further 5 points based on model error reduction
+newpoints = k.infill(5, method='error')
+for point in newpoints:
+    print point
+    k.addPoint(point, testfun(point)[0])
+k.train(optimizer='pso')
+k.snapshot()
+
+#And plot the results
 print 'Now plotting final results...'
 k.plot()
+
 
 

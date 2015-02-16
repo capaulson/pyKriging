@@ -1,6 +1,7 @@
 import pyKriging
 from pyKriging.krige import kriging
 from pyKriging.samplingplan import samplingplan
+from pyKriging.testfunctions import testfunctions
 import dill as pickle
 
 
@@ -9,7 +10,7 @@ sp = samplingplan(3)
 X = sp.optimallhc(30)
 
 ## Next, we define the problem we would like to solve
-testfun = pyKriging.testfunctions.squared
+testfun = testfunctions().squared
 y = testfun(X)
 
 ## Now that we have our initial data, we can create an instance of a kriging model
@@ -34,7 +35,7 @@ for i in range(5):
     k.train()
 
 # Save the trained model
-pickle.dump(k,  open('trainedModel.pkl', 'wb'))
+# pickle.dump(k,  open('trainedModel1.pkl', 'wb'))
 
 ## Once the training of the model is complete, we can plot the results
 k.plot()

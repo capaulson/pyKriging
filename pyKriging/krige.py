@@ -2,19 +2,24 @@ from __future__ import division
 
 __author__ = 'chrispaulson'
 import numpy as np
+import scipy
+from scipy.optimize import minimize
 from matrixops import matrixops
 import copy
 from matplotlib import pyplot as plt
+import pylab
+
 from mpl_toolkits.mplot3d import axes3d
 from pyKriging import samplingplan
 import inspyred
 from random import Random
 from time import time
 from inspyred import ec
+import math as m
 
 
 class kriging(matrixops):
-    def __init__(self, X, y, testfunction=None, name='', **kwargs):
+    def __init__(self, X, y, testfunction=None, name='', testPoints=None, **kwargs):
         self.X = copy.deepcopy(X)
         self.y = copy.deepcopy(y)
         self.testfunction = testfunction
@@ -27,14 +32,40 @@ class kriging(matrixops):
         self.normRange = []
         self.ynormRange = []
         self.normalizeData()
-        self.sp = samplingplan.samplingplan()
+        self.sp = samplingplan.samplingplan(self.k)
         self.updateData()
         self.updateModel()
 
-        self.thetamin = 1e-3
+        self.thetamin = 1e-4
         self.thetamax = 100
         self.pmin = 1
         self.pmax = 2
+
+        # Setup functions for tracking history
+        self.history = {}
+        self.history['points'] = []
+        self.history['neglnlike'] = []
+        self.history['theta'] = []
+        self.history['p'] = []
+        if testPoints:
+            self.history['pointData'] = []
+            self.testPoints = self.sp.rlh(testPoints)
+
+            for point in self.testPoints:
+                testPrimitive = {}
+                testPrimitive['point'] = point
+                if self.testfunction:
+                    testPrimitive['actual'] = self.testfunction(point)[0]
+                else:
+                    testPrimitive['actual'] = None
+                testPrimitive['predicted'] = []
+                testPrimitive['mse'] = []
+                testPrimitive['gradient'] = []
+                self.history['pointData'].append(testPrimitive)
+
+        else:
+            self.history['pointData'] = None
+
 
         matrixops.__init__(self)
 
@@ -86,25 +117,6 @@ class kriging(matrixops):
             else:
                 break
 
-    def fittingObjective(self,candidates, args):
-        fitness = []
-        for entry in candidates:
-            f=10000
-            for i in range(self.k):
-                self.theta[i] = entry[i]
-            for i in range(self.k):
-                self.pl[i] = entry[i + self.k]
-            try:
-                self.updateModel()
-                self.neglikelihood()
-                f = self.NegLnLike
-            except Exception, e:
-                # print 'Failure in NegLNLike, failing the run'
-                # print Exception, e
-                f = 1000
-            fitness.append(f)
-        return fitness
-
     def generate_population(self, random, args):
         size = args.get('num_inputs', None)
         bounder = args["_ec"].bounder
@@ -147,10 +159,46 @@ class kriging(matrixops):
         # print X, self.predict_normalized(X), self.inversenormy(self.predict_normalized(X))
         return self.predicterr_normalized(X)
 
-    def infill_objective(self,candidates, args):
+    def expimp(self, x):
+        S = self.predicterr_normalized(x)
+        y_min = np.min(self.y)
+        if S <= 0.:
+            EI = 0.
+        elif S > 0.:
+            EI_one = ((y_min - self.predict_normalized(x)) * (0.5 + 0.5*m.erf((
+                      1./np.sqrt(2.))*((y_min - self.predict_normalized(x)) /
+                                       S))))
+            EI_two = ((S * (1. / np.sqrt(2. * np.pi))) * (np.exp(-(1./2.) *
+                      ((y_min - self.predict_normalized(x))**2. / S**2.))))
+            EI = EI_one + EI_two
+        return EI
+
+    def weightedexpimp(self, x, w):
+        """weighted expected improvement (Sobester et al. 2005)"""
+        S = self.predicterr_normalized(x)
+        y_min = np.min(self.y)
+        if S <= 0.:
+            EI = 0.
+        elif S > 0.:
+            EI_one = w*((y_min - self.predict_normalized(x)) * (0.5 +
+                        0.5*m.erf((1./np.sqrt(2.))*((y_min -
+                                  self.predict_normalized(x)) / S))))
+            EI_two = ((1. - w)*(S * (1. / np.sqrt(2. * np.pi))) *
+                      (np.exp(-(1./2.) * ((y_min -
+                       self.predict_normalized(x))**2. / S**2.))))
+            EI = EI_one + EI_two
+        return EI
+
+    def infill_objective_mse(self,candidates, args):
         fitness = []
         for entry in candidates:
             fitness.append(-1 * self.predicterr_normalized(entry))
+        return fitness
+
+    def infill_objective_ei(self,candidates, args):
+        fitness = []
+        for entry in candidates:
+            fitness.append(-1 * self.expimp(entry))
         return fitness
 
     def infill(self, points, method='error'):
@@ -165,14 +213,19 @@ class kriging(matrixops):
             rand.seed(int(time()))
             ea = inspyred.swarm.PSO(Random())
             ea.terminator = self.no_improvement_termination
-            ea.topology = inspyred.swarm.topologies.star_topology
+            ea.topology = inspyred.swarm.topologies.ring_topology
+            if method=='ei':
+                evaluator = self.infill_objective_ei
+            else:
+                evaluator = self.infill_objective_mse
+
             final_pop = ea.evolve(generator=self.generate_population,
-                                  evaluator=self.infill_objective,
-                                  pop_size=100,
+                                  evaluator=evaluator,
+                                  pop_size=155,
                                   maximize=False,
                                   bounder=ec.Bounder([0] * self.k, [1] * self.k),
                                   max_evaluations=20000,
-                                  neighborhood_size=10,
+                                  neighborhood_size=30,
                                   num_inputs=self.k)
             final_pop.sort(reverse=True)
             newpoint = final_pop[0].candidate
@@ -212,7 +265,7 @@ class kriging(matrixops):
         - *max_generations* -- the number of generations allowed for no change in fitness (default 10)
 
         """
-        max_generations = args.setdefault('max_generations', 100)
+        max_generations = args.setdefault('max_generations', 10)
         previous_best = args.setdefault('previous_best', None)
         max_evaluations = args.setdefault('max_evaluations', 30000)
         current_best = np.around(max(population).fitness, decimals=4)
@@ -237,15 +290,15 @@ class kriging(matrixops):
         if optimizer is 'pso':
             ea = inspyred.swarm.PSO(Random())
             ea.terminator = self.no_improvement_termination
-            ea.topology = inspyred.swarm.topologies.star_topology
+            ea.topology = inspyred.swarm.topologies.ring_topology
             # ea.observer = inspyred.ec.observers.stats_observer
             final_pop = ea.evolve(generator=self.generate_population,
                                   evaluator=self.fittingObjective,
-                                  pop_size=75,
+                                  pop_size=150,
                                   maximize=False,
                                   bounder=ec.Bounder(lowerBound, upperBound),
-                                  max_evaluations=15000,
-                                  neighborhood_size=25,
+                                  max_evaluations=30000,
+                                  neighborhood_size=20,
                                   num_inputs=self.k)
             # Sort and print the best individual, who will be at index 0.
             final_pop.sort(reverse=True)
@@ -254,14 +307,26 @@ class kriging(matrixops):
             ea.terminator = self.no_improvement_termination
             final_pop = ea.evolve(generator=self.generate_population,
                                   evaluator=self.fittingObjective,
-                                  pop_size=150,
+                                  pop_size=200,
                                   maximize=False,
                                   bounder=ec.Bounder(lowerBound, upperBound),
                                   max_evaluations=30000,
-                                  num_elites=0,
-                                  mutation_rate=.2)
+                                  num_elites=1,
+                                  mutation_rate=.05)
         for entry in final_pop:
             newValues = entry.candidate
+            preLOP = copy.deepcopy(newValues)
+            locOP_bounds = []
+            for i in range(self.k):
+                locOP_bounds.append( [self.thetamin, self.thetamax] )
+
+            for i in range(self.k):
+                locOP_bounds.append( [self.pmin, self.pmax] )
+
+            lopResults = minimize(self.fittingObjective_local, newValues, method='SLSQP', bounds=locOP_bounds, options={'disp': False})
+
+            newValues = lopResults['x']
+
             for i in range(self.k):
                 self.theta[i] = newValues[i]
             for i in range(self.k):
@@ -273,7 +338,42 @@ class kriging(matrixops):
             else:
                 break
 
-    def plot(self, labels=False):
+    def fittingObjective(self,candidates, args):
+        fitness = []
+        for entry in candidates:
+            f=10000
+            for i in range(self.k):
+                self.theta[i] = entry[i]
+            for i in range(self.k):
+                self.pl[i] = entry[i + self.k]
+            try:
+                self.updateModel()
+                self.neglikelihood()
+                f = self.NegLnLike
+            except Exception, e:
+                # print 'Failure in NegLNLike, failing the run'
+                # print Exception, e
+                f = 10000
+            fitness.append(f)
+        return fitness
+
+    def fittingObjective_local(self,entry):
+        f=10000
+        for i in range(self.k):
+            self.theta[i] = entry[i]
+        for i in range(self.k):
+            self.pl[i] = entry[i + self.k]
+        try:
+            self.updateModel()
+            self.neglikelihood()
+            f = self.NegLnLike
+        except Exception, e:
+            # print 'Failure in NegLNLike, failing the run'
+            # print Exception, e
+            f = 10000
+        return f
+
+    def plot(self, labels=False, show=True):
         if self.k == 3:
             import mayavi.mlab as mlab
 
@@ -306,24 +406,25 @@ class kriging(matrixops):
             plot.compute_normals = False
             errplt = mlab.contour3d(errscalars, contours=15, transparent=True, figure=errorFig)
             errplt.compute_normals = False
-            mlab.show()
+            if show:
+                mlab.show()
 
         if self.k==2:
             samplePoints = zip(*self.X)
             # Create a set of data to plot
             plotgrid = 61
-            x = np.linspace(0, 1, num=plotgrid)
-            y = np.linspace(0, 1, num=plotgrid)
+            x = np.linspace(self.normRange[0][0], self.normRange[0][1], num=plotgrid)
+            y = np.linspace(self.normRange[1][0], self.normRange[1][1], num=plotgrid)
             X, Y = np.meshgrid(x, y)
 
             # Predict based on the optimized results
 
-            zs = np.array([self.predict_normalized([x,y]) for x,y in zip(np.ravel(X), np.ravel(Y))])
+            zs = np.array([self.predict([x,y]) for x,y in zip(np.ravel(X), np.ravel(Y))])
             Z = zs.reshape(X.shape)
-            Z = (Z*(self.ynormRange[1]-self.ynormRange[0]))+self.ynormRange[0]
+            # Z = (Z*(self.ynormRange[1]-self.ynormRange[0]))+self.ynormRange[0]
 
             #Calculate errors
-            zse = np.array([self.predicterr_normalized([x,y]) for x,y in zip(np.ravel(X), np.ravel(Y))])
+            zse = np.array([self.predict_var([x,y]) for x,y in zip(np.ravel(X), np.ravel(Y))])
             Ze = zse.reshape(X.shape)
 
             if self.testfunction:
@@ -332,26 +433,28 @@ class kriging(matrixops):
                 ZT = zt.reshape(X.shape)
 
             #Plot real world values
-            X = (X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
-            Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
-            spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
-            spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
-            fig = plt.figure(figsize=(8,6))
+            # X = (X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
+            # Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
+            # spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
+            spx = (self.X[:,0])
+            # spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
+            spy = (self.X[:,1])
+            fig = pylab.figure(figsize=(8,6))
             ax = fig.add_subplot(221)
             # contour_levels = np.linspace(min(zt), max(zt),50)
             contour_levels = 15
             CS = plt.contourf(X,Y,Z,contour_levels)
-            plt.plot(spx, spy,'ow')
-            plt.colorbar()
+            pylab.plot(spx, spy,'ow')
+            pylab.colorbar()
 
             if self.testfunction:
-                CS = plt.contour(X,Y,ZT,contour_levels,colors='k')
-            plt.plot(spx, spy,'ow')
+                CS = pylab.contour(X,Y,ZT,contour_levels,colors='k')
+            pylab.plot(spx, spy,'ow')
 
             ax = fig.add_subplot(222)
-            CS = plt.contourf(X,Y,Ze, contour_levels)
-            plt.colorbar()
-            plt.plot(spx, spy,'ow')
+            CS = pylab.contourf(X,Y,Ze, contour_levels)
+            pylab.colorbar()
+            pylab.plot(spx, spy,'ow')
 
             ax = fig.add_subplot(212, projection='3d')
             # fig = plt.gcf()
@@ -359,8 +462,8 @@ class kriging(matrixops):
             ax.plot_surface(X, Y, Z, rstride=3, cstride=3, alpha=0.4)
             if self.testfunction:
                 ax.plot_wireframe(X, Y, ZT, rstride=3, cstride=3)
-
-            plt.show()
+            if show:
+                pylab.show()
 
     def saveFigure(self, name=None):
         if self.k == 3:
@@ -464,4 +567,18 @@ class kriging(matrixops):
             values[enu] = self.predict_var(point)
         return np.mean(values), np.std(values)
 
+    def snapshot(self):
+        self.history['points'].append(self.n)
+        self.history['neglnlike'].append(self.NegLnLike)
+        self.history['theta'].append(copy.deepcopy(self.theta))
+        self.history['p'].append(copy.deepcopy(self.pl))
+
+        if self.history['pointData']!=None:
+            for pointprim in self.history['pointData']:
+                pointprim['predicted'].append( self.predict(pointprim['point']) )
+                pointprim['mse'].append( self.predict_var(pointprim['point']) )
+                try:
+                    pointprim['gradient'] = np.gradient( pointprim['predicted'] )
+                except:
+                    pass
 
