@@ -5,10 +5,11 @@ from pyKriging.samplingplan import samplingplan
 
 # The Kriging model starts by defining a sampling plan, we use an optimal Latin Hypercube here
 sp = samplingplan(2)
-X = sp.optimallhc(10)
+X = sp.optimallhc(15)
 
 # Next, we define the problem we would like to solve
 testfun = pyKriging.testfunctions().branin
+
 y = testfun(X)
 
 print 'Setting up the Kriging Model'

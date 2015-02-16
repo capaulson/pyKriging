@@ -229,7 +229,7 @@ class kriging(matrixops):
                                   num_inputs=self.k)
             final_pop.sort(reverse=True)
             newpoint = final_pop[0].candidate
-            returnValues[i][:] = self.inversenormX(newpoint)
+            returnValues[i][:] = newpoint
             self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
 
         self.X = np.copy(initX)
@@ -294,7 +294,7 @@ class kriging(matrixops):
             # ea.observer = inspyred.ec.observers.stats_observer
             final_pop = ea.evolve(generator=self.generate_population,
                                   evaluator=self.fittingObjective,
-                                  pop_size=150,
+                                  pop_size=300,
                                   maximize=False,
                                   bounder=ec.Bounder(lowerBound, upperBound),
                                   max_evaluations=30000,
@@ -307,11 +307,11 @@ class kriging(matrixops):
             ea.terminator = self.no_improvement_termination
             final_pop = ea.evolve(generator=self.generate_population,
                                   evaluator=self.fittingObjective,
-                                  pop_size=200,
+                                  pop_size=300,
                                   maximize=False,
                                   bounder=ec.Bounder(lowerBound, upperBound),
                                   max_evaluations=30000,
-                                  num_elites=1,
+                                  num_elites=10,
                                   mutation_rate=.05)
         for entry in final_pop:
             newValues = entry.candidate
@@ -415,6 +415,9 @@ class kriging(matrixops):
             plotgrid = 61
             x = np.linspace(self.normRange[0][0], self.normRange[0][1], num=plotgrid)
             y = np.linspace(self.normRange[1][0], self.normRange[1][1], num=plotgrid)
+
+            x = np.linspace(0, 1, num=plotgrid)
+            y = np.linspace(0, 1, num=plotgrid)
             X, Y = np.meshgrid(x, y)
 
             # Predict based on the optimized results
@@ -435,10 +438,10 @@ class kriging(matrixops):
             #Plot real world values
             # X = (X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
             # Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
-            # spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
-            spx = (self.X[:,0])
-            # spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
-            spy = (self.X[:,1])
+            spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
+            # spx = (self.inversenormX()self.X[:,0])
+            spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
+            # spy = (self.X[:,1])
             fig = pylab.figure(figsize=(8,6))
             ax = fig.add_subplot(221)
             # contour_levels = np.linspace(min(zt), max(zt),50)
