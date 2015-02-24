@@ -74,24 +74,45 @@ class kriging(matrixops):
         matrixops.__init__(self)
 
     def normX(self, X):
+        '''
+        :param X: An array of points (self.k long) in physical world units
+        :return X: An array normed to our model range of [0,1] for each dimension
+        '''
         X = copy.deepcopy(X)
         for i in range(self.k):
             X[i] = (X[i] - self.normRange[i][0]) / float(self.normRange[i][1] - self.normRange[i][0])
         return X
 
     def inversenormX(self, X):
+        '''
+
+        :param X: An array of points (self.k long) in normalized model units
+        :return X : An array of real world units
+        '''
         X = copy.deepcopy(X)
         for i in range(self.k):
             X[i] = (X[i] * float(self.normRange[i][1] - self.normRange[i][0] )) + self.normRange[i][0]
         return X
 
     def normy(self, y):
+        '''
+        :param y: An array of observed values in real-world units
+        :return y: A normalized array of model units in the range of [0,1]
+        '''
         return (y - self.ynormRange[0]) / (self.ynormRange[1] - self.ynormRange[0])
 
     def inversenormy(self, y):
+        '''
+        :param y: A normalized array of model units in the range of [0,1]
+        :return: An array of observed values in real-world units
+        '''
         return (y * (self.ynormRange[1] - self.ynormRange[0])) + self.ynormRange[0]
 
     def normalizeData(self):
+        '''
+        This function is called when the initial data in the model is set.
+        We find the max and min of each dimension and norm that axis to a range of [0,1]
+        '''
         for i in range(self.k):
             self.normRange.append([min(self.X[:, i]), max(self.X[:, i])])
 
@@ -105,6 +126,12 @@ class kriging(matrixops):
             self.y[i] = self.normy(self.y[i])
 
     def addPoint(self, newX, newy, norm=True):
+        '''
+        This add points to the model.
+        :param newX: A new design vector point
+        :param newy: The new observed value at the point of X
+        :param norm: A boolean value. For adding real-world values, this should be True. If doing something in model units, this should be False
+        '''
         if norm:
             newX = self.normX(newX)
             newy = self.normy(newy)
@@ -121,15 +148,11 @@ class kriging(matrixops):
             else:
                 break
 
-    def generate_population(self, random, args):
-        size = args.get('num_inputs', None)
-        bounder = args["_ec"].bounder
-        chromosome = []
-        for lo, hi in zip(bounder.lower_bound, bounder.upper_bound):
-            chromosome.append(random.uniform(lo, hi))
-        return chromosome
-
     def update(self, values):
+        '''
+        The function sets new hyperparameters
+        :param values: the new theta and p values to set for the model
+        '''
         for i in range(self.k):
             self.theta[i] = values[i]
         for i in range(self.k):
@@ -137,6 +160,9 @@ class kriging(matrixops):
         self.updateModel()
 
     def updateModel(self):
+        '''
+        The function rebuilds the Psi matrix to reflect new data or a change in hyperparamters
+        '''
         try:
             self.updatePsi()
         except Exception, err:
@@ -146,6 +172,7 @@ class kriging(matrixops):
 
     def predict(self, X):
         '''
+        This function returns the prediction of the model at the real world coordinates of X
         :param X: Design variable to evaluate
         :return: Returns the 'real world' predicted value
         '''
@@ -155,8 +182,9 @@ class kriging(matrixops):
 
     def predict_var(self, X):
         '''
-        :param X: new design variable to evaluate
-        :return: Returns the posterior variance
+        The function returns the model's predicted 'error' at this point in the model.
+        :param X: new design variable to evaluate, in physical world units
+        :return: Returns the posterior variance (model error prediction)
         '''
         X = copy.deepcopy(X)
         X = self.normX(X)
@@ -164,6 +192,11 @@ class kriging(matrixops):
         return self.predicterr_normalized(X)
 
     def expimp(self, x):
+        '''
+        Returns the expected improvement at the design vector X in the model
+        :param x: A real world coordinates design vector
+        :return EI: The expected improvement value at the point x in the model
+        '''
         S = self.predicterr_normalized(x)
         y_min = np.min(self.y)
         if S <= 0.:
@@ -194,6 +227,12 @@ class kriging(matrixops):
         return EI
 
     def infill_objective_mse(self,candidates, args):
+        '''
+        This acts
+        :param candidates: An array of candidate design vectors from the global optimizer
+        :param args: args from the optimizer
+        :return fitness: An array of evaluated MSE values for the candidate population
+        '''
         fitness = []
         for entry in candidates:
             fitness.append(-1 * self.predicterr_normalized(entry))
@@ -248,6 +287,21 @@ class kriging(matrixops):
             else:
                 break
         return returnValues
+
+    def generate_population(self, random, args):
+        '''
+
+        :param random: A
+        :param args:
+        :return chromosome: The new generation for our global optimizer to use
+        '''
+        size = args.get('num_inputs', None)
+        bounder = args["_ec"].bounder
+        chromosome = []
+        for lo, hi in zip(bounder.lower_bound, bounder.upper_bound):
+            chromosome.append(random.uniform(lo, hi))
+        return chromosome
+
 
     def no_improvement_termination(self, population, num_generations, num_evaluations, args):
         """Return True if the best fitness does not change for a number of generations of if the max number

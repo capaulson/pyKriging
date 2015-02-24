@@ -21,11 +21,11 @@ k.train(optimizer=optimizer)
 k.snapshot()
 
 
-#Add 10 points based on model error reduction
+# Add 10 points based on model error reduction
 for i in range(5):
     newpoints = k.infill(1, method='error')
     for point in newpoints:
-        print 'Adding point {}'.format( point )
+        print 'Adding point {}'.format(point)
         k.addPoint(point, testfun(point)[0])
     k.train(optimizer=optimizer)
     k.snapshot()
@@ -34,14 +34,12 @@ for i in range(5):
 for i in range(5):
     newpoints = k.infill(1, method='ei')
     for point in newpoints:
-        print 'Adding point {}'.format( point )
+        print 'Adding point {}'.format(point)
         k.addPoint(point, testfun(point)[0])
     k.train(optimizer=optimizer)
     k.snapshot()
 
-
-
-#And plot the results
+# And plot the results
 print 'Now plotting final results...'
 k.plot()
 

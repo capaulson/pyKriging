@@ -22,10 +22,10 @@ k.snapshot()
 
 # Let's setup our infill to terminate once our prediction has 'converged'
 # That is to say that two iterations of predictions have an rsquared value of something like 0.9999
-while k.history['rsquared'][-1]<0.9999:
+while k.history['rsquared'][-1] < 0.9999:
     newpoints = k.infill(2)
     for point in newpoints:
-        print 'Adding point {}'.format( point )
+        print 'Adding point {}'.format(point)
         k.addPoint(point, testfun(point)[0])
     k.train()
     k.snapshot()
