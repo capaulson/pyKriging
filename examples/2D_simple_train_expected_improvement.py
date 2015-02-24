@@ -11,6 +11,7 @@ X = sp.optimallhc(15)
 testfun = pyKriging.testfunctions().paulson1
 y = testfun(X)
 
+# We can choose between a ga and a pso here
 optimizer = 'ga'
 
 # Now that we have our initial data, we can create an instance of a kriging model
@@ -22,18 +23,18 @@ k.snapshot()
 
 #Add 10 points based on model error reduction
 for i in range(5):
-    newpoints = k.infill(2, method='error')
+    newpoints = k.infill(1, method='error')
     for point in newpoints:
-        print point
+        print 'Adding point {}'.format( point )
         k.addPoint(point, testfun(point)[0])
     k.train(optimizer=optimizer)
     k.snapshot()
 
 # Infill ten points based on the expected improvement criterion
-for i in range(10):
+for i in range(5):
     newpoints = k.infill(1, method='ei')
     for point in newpoints:
-        print point
+        print 'Adding point {}'.format( point )
         k.addPoint(point, testfun(point)[0])
     k.train(optimizer=optimizer)
     k.snapshot()

@@ -25,7 +25,7 @@ k.snapshot()
 while k.history['rsquared'][-1]<0.9999:
     newpoints = k.infill(2)
     for point in newpoints:
-        print point
+        print 'Adding point {}'.format( point )
         k.addPoint(point, testfun(point)[0])
     k.train()
     k.snapshot()
