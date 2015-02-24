@@ -1,3 +1,6 @@
+### Warning: Outdated, should be updated soon
+
+
 __author__ = 'chrispaulson'
 import numpy as np
 from matrixops import matrixops
