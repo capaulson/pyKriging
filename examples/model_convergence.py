@@ -20,13 +20,18 @@ k = kriging(X, y, testfunction=testfun, name='simple', testPoints=250)
 k.train(optimizer='ga')
 k.snapshot()
 
-for i in range(5):
+# Let's setup our infill to terminate once our prediction has 'converged'
+# That is to say that two iterations of predictions have an rsquared value of something like 0.9999
+while k.history['rsquared'][-1]<0.9999:
     newpoints = k.infill(2)
     for point in newpoints:
         print point
         k.addPoint(point, testfun(point)[0])
     k.train()
     k.snapshot()
+    print 'Current rsquared is: {}'.format(k.history['rsquared'][-1])
+
+print 'The prediction has converged, with {} number of points in the model'.format(k.n)
 
 # #And plot the model
 

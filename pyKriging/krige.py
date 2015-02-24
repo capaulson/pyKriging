@@ -47,6 +47,10 @@ class kriging(matrixops):
         self.history['neglnlike'] = []
         self.history['theta'] = []
         self.history['p'] = []
+        self.history['rsquared'] = [0]
+        self.history['adjrsquared'] = [0]
+        self.history['chisquared'] = [1000]
+        self.history['lastPredictedPoints'] = []
         if testPoints:
             self.history['pointData'] = []
             self.testPoints = self.sp.rlh(testPoints)
@@ -397,7 +401,7 @@ class kriging(matrixops):
                 for i in range(X.shape[0]):
                     for j in range(X.shape[1]):
                         for k1 in range(X.shape[2]):
-                            tfscalars[i][j][k1] = self.testfunction([X[i][j][k1], Y[i][j][k1], Z[i][j][k1]])
+                            tfplot = tfscalars[i][j][k1] = self.testfunction([X[i][j][k1], Y[i][j][k1], Z[i][j][k1]])
                 plot = mlab.contour3d(tfscalars, contours=15, transparent=True, figure=truthFig)
                 plot.compute_normals = False
 
@@ -410,6 +414,7 @@ class kriging(matrixops):
                 mlab.show()
 
         if self.k==2:
+            fig = pylab.figure(figsize=(8,6))
             samplePoints = zip(*self.X)
             # Create a set of data to plot
             plotgrid = 61
@@ -430,34 +435,33 @@ class kriging(matrixops):
             zse = np.array([self.predict_var([x,y]) for x,y in zip(np.ravel(X), np.ravel(Y))])
             Ze = zse.reshape(X.shape)
 
-            if self.testfunction:
-                # Setup the truth function
-                zt = self.testfunction( np.array(zip(np.ravel(X), np.ravel(Y))) )
-                ZT = zt.reshape(X.shape)
-
-            #Plot real world values
-            # X = (X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
-            # Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
             spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
-            # spx = (self.inversenormX()self.X[:,0])
             spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
-            # spy = (self.X[:,1])
-            fig = pylab.figure(figsize=(8,6))
-            ax = fig.add_subplot(221)
-            # contour_levels = np.linspace(min(zt), max(zt),50)
-            contour_levels = 15
-            CS = plt.contourf(X,Y,Z,contour_levels)
-            pylab.plot(spx, spy,'ow')
-            pylab.colorbar()
-
-            if self.testfunction:
-                CS = pylab.contour(X,Y,ZT,contour_levels,colors='k')
-            pylab.plot(spx, spy,'ow')
+            contour_levels = 25
 
             ax = fig.add_subplot(222)
             CS = pylab.contourf(X,Y,Ze, contour_levels)
             pylab.colorbar()
             pylab.plot(spx, spy,'ow')
+
+            ax = fig.add_subplot(221)
+            if self.testfunction:
+                # Setup the truth function
+                zt = self.testfunction( np.array(zip(np.ravel(X), np.ravel(Y))) )
+                ZT = zt.reshape(X.shape)
+                CS = pylab.contour(X,Y,ZT,contour_levels ,colors='k',zorder=2)
+
+
+            # contour_levels = np.linspace(min(zt), max(zt),50)
+            if self.testfunction:
+                contour_levels = CS.levels
+                delta = np.abs(contour_levels[0]-contour_levels[1])
+                contour_levels = np.insert(contour_levels, 0, contour_levels[0]-delta)
+                contour_levels = np.append(contour_levels, contour_levels[-1]+delta)
+
+            CS = plt.contourf(X,Y,Z,contour_levels,zorder=1)
+            pylab.plot(spx, spy,'ow', zorder=3)
+            pylab.colorbar()
 
             ax = fig.add_subplot(212, projection='3d')
             # fig = plt.gcf()
@@ -576,12 +580,32 @@ class kriging(matrixops):
         self.history['theta'].append(copy.deepcopy(self.theta))
         self.history['p'].append(copy.deepcopy(self.pl))
 
+        currentPredictions = []
         if self.history['pointData']!=None:
             for pointprim in self.history['pointData']:
-                pointprim['predicted'].append( self.predict(pointprim['point']) )
+                predictedPoint = self.predict(pointprim['point'])
+                currentPredictions.append(copy.deepcopy( predictedPoint) )
+
+                pointprim['predicted'].append( predictedPoint )
                 pointprim['mse'].append( self.predict_var(pointprim['point']) )
                 try:
                     pointprim['gradient'] = np.gradient( pointprim['predicted'] )
                 except:
                     pass
+        if self.history['lastPredictedPoints'] != []:
+            self.history['chisquared'].append( self.chisquared(  self.history['lastPredictedPoints'], currentPredictions  ) )
+            self.history['rsquared'].append( self.rsquared( self.history['lastPredictedPoints'], currentPredictions ) )
+            self.history['adjrsquared'].append( self.adjrsquares( self.history['rsquared'][-1], len( self.history['pointData'] )  ) )
+        self.history[ 'lastPredictedPoints' ] = copy.deepcopy(currentPredictions)
 
+    def rsquared(self,actual, observed):
+        return np.corrcoef(observed, actual)[0,1] ** 2
+
+    def adjrsquares(self, rsquared, obs):
+        return 1-(1-rsquared)*((obs-1)/(obs-self.k))   # adjusted R-square
+
+
+    def chisquared(self, actual, observed):
+        actual = np.array(actual)
+        observed = np.array(observed)
+        return np.sum( np.abs( np.power( (observed-actual)  ,2)/actual ) )
