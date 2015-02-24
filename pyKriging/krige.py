@@ -229,7 +229,7 @@ class kriging(matrixops):
     def infill_objective_mse(self,candidates, args):
         '''
         This acts
-        :param candidates: An array of candidate design vectors from the global optimizer
+        :param candidates: An array of candidate design vectors from the infill global optimizer
         :param args: args from the optimizer
         :return fitness: An array of evaluated MSE values for the candidate population
         '''
@@ -239,12 +239,24 @@ class kriging(matrixops):
         return fitness
 
     def infill_objective_ei(self,candidates, args):
+        '''
+        The infill objective for a series of candidates from infill global search
+        :param candidates: An array of candidate design vectors from the infill global optimizer
+        :param args: args from the optimizer
+        :return fitness: An array of evaluated Expected Improvement values for the candidate population
+        '''
         fitness = []
         for entry in candidates:
             fitness.append(-1 * self.expimp(entry))
         return fitness
 
     def infill(self, points, method='error'):
+        '''
+        The function identifies where new points are needed in the model.
+        :param points: The number of points to add to the model. Multiple points are added via imputation.
+        :param method: Two choices: EI (for expected improvement) or Error (for general error reduction)
+        :return: An array of coordinates identified by the infill
+        '''
         # We'll be making non-permanent modifications to self.X and self.y here, so lets make a copy just in case
         initX = np.copy(self.X)
         inity = np.copy(self.y)
@@ -290,9 +302,9 @@ class kriging(matrixops):
 
     def generate_population(self, random, args):
         '''
-
-        :param random: A
-        :param args:
+        Generates an initial population for any global optimization that occurs in pyKriging
+        :param random: A random seed
+        :param args: Args from the optimizer, like population size
         :return chromosome: The new generation for our global optimizer to use
         '''
         size = args.get('num_inputs', None)
@@ -306,11 +318,6 @@ class kriging(matrixops):
     def no_improvement_termination(self, population, num_generations, num_evaluations, args):
         """Return True if the best fitness does not change for a number of generations of if the max number
         of evaluations is exceeded.
-
-        This function keeps track of the current best fitness and compares it to
-        the best fitness in previous generations. Whenever those values are the
-        same, it begins a generation count. If that count exceeds a specified
-        number, the terminator returns True.
 
         .. Arguments:
            population -- the population of Individuals
@@ -339,12 +346,22 @@ class kriging(matrixops):
                 return False or (num_evaluations >= max_evaluations)
 
     def train(self, optimizer='pso'):
+        '''
+        The function trains the hyperparameters of the Kriging model.
+        :param optimizer: Two optimizers are implemented, a Particle Swarm Optimizer or a GA
+        '''
+        # First make sure our data is up-to-date
         self.updateData()
-        # self.updateModel()
+
+        # Establish the bounds for optimization for theta and p values
         lowerBound = [self.thetamin] * self.k + [self.pmin] * self.k
         upperBound = [self.thetamax] * self.k + [self.pmax] * self.k
+
+        #Create a random seed for our optimizer to use
         rand = Random()
         rand.seed(int(time()))
+
+        # If the optimizer option is PSO, run the PSO algorithm
         if optimizer is 'pso':
             ea = inspyred.swarm.PSO(Random())
             ea.terminator = self.no_improvement_termination
@@ -360,6 +377,8 @@ class kriging(matrixops):
                                   num_inputs=self.k)
             # Sort and print the best individual, who will be at index 0.
             final_pop.sort(reverse=True)
+
+        # If not using a PSO search, run the GA
         elif optimizer is 'ga':
             ea = inspyred.ec.GA(Random())
             ea.terminator = self.no_improvement_termination
@@ -371,6 +390,8 @@ class kriging(matrixops):
                                   max_evaluations=30000,
                                   num_elites=10,
                                   mutation_rate=.05)
+
+        # This code updates the model with the hyperparameters found in the global search
         for entry in final_pop:
             newValues = entry.candidate
             preLOP = copy.deepcopy(newValues)
@@ -381,10 +402,12 @@ class kriging(matrixops):
             for i in range(self.k):
                 locOP_bounds.append( [self.pmin, self.pmax] )
 
+            # Let's quickly double check that we're at the optimal value by running a quick local optimizaiton
             lopResults = minimize(self.fittingObjective_local, newValues, method='SLSQP', bounds=locOP_bounds, options={'disp': False})
 
             newValues = lopResults['x']
 
+            # Finally, set our new theta and pl values and update the model again
             for i in range(self.k):
                 self.theta[i] = newValues[i]
             for i in range(self.k):
@@ -397,6 +420,12 @@ class kriging(matrixops):
                 break
 
     def fittingObjective(self,candidates, args):
+        '''
+        The objective for a series of candidates from the hyperparameter global search.
+        :param candidates: An array of candidate design vectors from the global optimizer
+        :param args: args from the optimizer
+        :return fitness: An array of evaluated NegLNLike values for the candidate population
+        '''
         fitness = []
         for entry in candidates:
             f=10000
@@ -416,6 +445,10 @@ class kriging(matrixops):
         return fitness
 
     def fittingObjective_local(self,entry):
+        '''
+        :param entry: The same objective function as the global optimizer, but formatted for the local optimizer
+        :return: The fitness of the surface at the hyperparameters specified in entry
+        '''
         f=10000
         for i in range(self.k):
             self.theta[i] = entry[i]
@@ -432,6 +465,12 @@ class kriging(matrixops):
         return f
 
     def plot(self, labels=False, show=True):
+        '''
+        This function plots 2D and 3D models
+        :param labels:
+        :param show: If True, the plots are displayed at the end of this call. If False, plt.show() should be called outside this function
+        :return:
+        '''
         if self.k == 3:
             import mayavi.mlab as mlab
 
@@ -527,6 +566,10 @@ class kriging(matrixops):
                 pylab.show()
 
     def saveFigure(self, name=None):
+        '''
+        Similar to plot, except that figures are saved to file
+        :param name: the file name of the plot image
+        '''
         if self.k == 3:
             import mayavi.mlab as mlab
 
@@ -621,6 +664,12 @@ class kriging(matrixops):
             plt.savefig('pyKrigingResult.png')
 
     def calcuatemeanMSE(self, p2s=200, points=None):
+        '''
+        This function calculates the mean MSE metric of the model by evaluating MSE at a number of points.
+        :param p2s: Points to Sample, the number of points to sample the mean squared error at. Ignored if the points argument is specified
+        :param points: an array of points to sample the model at
+        :return: the mean value of MSE and the standard deviation of the MSE points
+        '''
         if points is None:
             points = self.sp.rlh(p2s)
         values = np.zeros(len(points))
@@ -629,6 +678,9 @@ class kriging(matrixops):
         return np.mean(values), np.std(values)
 
     def snapshot(self):
+        '''
+        This function saves a 'snapshot' of the model when the function is called. This allows for a playback of the training process
+        '''
         self.history['points'].append(self.n)
         self.history['neglnlike'].append(self.NegLnLike)
         self.history['theta'].append(copy.deepcopy(self.theta))
@@ -657,7 +709,6 @@ class kriging(matrixops):
 
     def adjrsquares(self, rsquared, obs):
         return 1-(1-rsquared)*((obs-1)/(obs-self.k))   # adjusted R-square
-
 
     def chisquared(self, actual, observed):
         actual = np.array(actual)
