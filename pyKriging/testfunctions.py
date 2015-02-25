@@ -158,6 +158,20 @@ class testfunctions():
         fact3 = 100*np.power(x1,3) + 500*np.power(x1,2) + 4*x1 + 20
 
         return (fact1 * fact2/fact3)
+        
+    def cosine(self, X):
+        try:
+            X.shape[1]
+        except:
+            X = np.array(X)
+
+        if len(X.shape)<2:
+            X = np.array([X])
+        y = np.array([],dtype=float)
+        for i in range(X.shape[0]):
+            y = np.append(y, np.cos(np.sum(X[i])))
+        return y
+
 
 
 
@@ -170,3 +184,4 @@ if __name__=='__main__':
     print a.stybtang([[1,1,1],[2,2,2]])
     print a.curretal88exp([[1,1,1],[2,2,2]])
     print a.zhou98([[1,1,1],[2,2,2]])
+    print a.cosine([[1,1,1],[2,2,2]])
