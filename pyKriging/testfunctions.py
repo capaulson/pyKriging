@@ -183,5 +183,4 @@ if __name__=='__main__':
     print a.cubed([[1,1,1],[2,2,2]])
     print a.stybtang([[1,1,1],[2,2,2]])
     print a.curretal88exp([[1,1,1],[2,2,2]])
-    print a.zhou98([[1,1,1],[2,2,2]])
     print a.cosine([[1,1,1],[2,2,2]])
