@@ -110,6 +110,20 @@ class testfunctions():
         y = X[:,1]
         return (np.sin(x*hz))/((x+.2)) + (np.cos(y*hz))/((y+.2))
 
+    def runge(self, X, offset=0.0):
+        try:
+            X.shape[1]
+        except:
+            X = np.array(X)
+
+        if len(X.shape)<2:
+            X = np.array([X])
+        offset = np.ones(X.shape[1])*offset
+        y = np.array([],dtype=float)
+        for i in range(X.shape[0]):
+            y = np.append(y, ( 1 / (1 + np.sum((X[i]-offset)**2))))
+        return y
+
     def stybtang(self,X):
         try:
             X.shape[1]
@@ -184,3 +198,4 @@ if __name__=='__main__':
     print a.stybtang([[1,1,1],[2,2,2]])
     print a.curretal88exp([[1,1,1],[2,2,2]])
     print a.cosine([[1,1,1],[2,2,2]])
+    print a.runge([[1,1,1],[2,2,2]])
