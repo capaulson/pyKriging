@@ -88,11 +88,20 @@ class matrixops():
             print Exception,e
             pass
 
-            # print 'X is: ', self.X
-            # print 'x is: ', x
-            # print 'size of u is:', np.size(self.U)
-            # print 'u is: ', self.U
-            # print 'psi is: ', self.psi
-        # SSqr=SigmaSqr*(1-psi'*(U\(U'\psi)));
+        SSqr = np.abs(SSqr[0])
+        return np.power(SSqr,0.5)[0]
+
+    def regression_predicterr_normalized(self,x):
+        for i in range(self.n):
+            try:
+                self.psi[i]=np.exp(-np.sum(self.theta*np.power((np.abs(self.X[i]-x)),self.pl)))
+            except Exception,e:
+                print Exception,e
+        try:
+            SSqr=self.SigmaSqr*(1+self.Lambda-self.psi.T.dot(np.linalg.solve(self.U, np.linalg.solve(self.U.T,self.psi))))
+        except Exception, e:
+            print Exception,e
+            pass
+
         SSqr = np.abs(SSqr[0])
         return np.power(SSqr,0.5)[0]
