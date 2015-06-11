@@ -27,7 +27,7 @@ class regression_kriging(matrixops):
         self.k = self.X.shape[1]
         self.theta = np.ones(self.k)
         self.pl = np.ones(self.k) * 2.
-        self.Lambda = 1
+        self.Lambda = 0
         self.sigma = 0
         self.normRange = []
         self.ynormRange = []
@@ -144,6 +144,7 @@ class regression_kriging(matrixops):
             try:
                 self.updateModel()
             except:
+                print 'Couldnt update the model with these hyperparameters, retraining'
                 self.train()
             else:
                 break
@@ -181,14 +182,15 @@ class regression_kriging(matrixops):
         X = self.normX(X)
         return self.inversenormy(self.predict_normalized(X))
 
-    def predict_var(self, X):
+    def predict_var(self, X, norm=True):
         '''
         The function returns the model's predicted 'error' at this point in the model.
         :param X: new design variable to evaluate, in physical world units
         :return: Returns the posterior variance (model error prediction)
         '''
         X = copy.deepcopy(X)
-        X = self.normX(X)
+        if norm:
+            X = self.normX(X)
         # print X, self.predict_normalized(X), self.inversenormy(self.predict_normalized(X))
         return self.predicterr_normalized(X)
 
@@ -251,7 +253,7 @@ class regression_kriging(matrixops):
             fitness.append(-1 * self.expimp(entry))
         return fitness
 
-    def infill(self, points, method='error'):
+    def infill(self, points, method='error', addPoint=True):
         '''
         The function identifies where new points are needed in the model.
         :param points: The number of points to add to the model. Multiple points are added via imputation.
@@ -286,7 +288,8 @@ class regression_kriging(matrixops):
             final_pop.sort(reverse=True)
             newpoint = final_pop[0].candidate
             returnValues[i][:] = newpoint
-            self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
+            if addPoint:
+                self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
 
         self.X = np.copy(initX)
         self.y = np.copy(inity)
@@ -679,7 +682,7 @@ class regression_kriging(matrixops):
             points = self.sp.rlh(p2s)
         values = np.zeros(len(points))
         for enu, point in enumerate(points):
-            values[enu] = self.predict_var(point)
+            values[enu] = self.predict_var(point, norm=False)
         return np.mean(values), np.std(values)
 
     def snapshot(self):

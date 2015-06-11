@@ -34,9 +34,9 @@ class matrixops():
     def regupdatePsi(self):
         self.Psi = np.zeros((self.n,self.n), dtype=np.float)
         self.one = np.ones(self.n)
-        for i in xrange(self.n):
-            for j in xrange(i+1,self.n):
-                self.Psi[i,j]=np.exp(-np.sum(self.theta*np.power(np.abs((self.X[i]-self.X[j])),self.pl)))
+        self.psi = np.zeros((self.n,1))
+        newPsi = np.exp(-np.sum(self.theta*np.power(self.distance,self.pl), axis=2))
+        self.Psi = np.triu(newPsi,1)
         self.Psi = self.Psi + self.Psi.T + eye(self.n) + eye(self.n) * (self.Lambda)
         self.U = np.linalg.cholesky(self.Psi)
         self.U = np.matrix(self.U.T)
@@ -85,6 +85,9 @@ class matrixops():
         try:
             SSqr=self.SigmaSqr*(1-self.psi.T.dot(np.linalg.solve(self.U, np.linalg.solve(self.U.T,self.psi))))
         except Exception, e:
+            print self.U.shape
+            print self.SigmaSqr.shape
+            print self.psi.shape
             print Exception,e
             pass
 

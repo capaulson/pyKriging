@@ -116,8 +116,10 @@ class kriging(matrixops):
         for i in range(self.k):
             self.normRange.append([min(self.X[:, i]), max(self.X[:, i])])
 
+        print self.X
         for i in range(self.n):
             self.X[i] = self.normX(self.X[i])
+        print self.X
 
         self.ynormRange.append(min(self.y))
         self.ynormRange.append(max(self.y))
@@ -285,7 +287,7 @@ class kriging(matrixops):
             final_pop.sort(reverse=True)
             newpoint = final_pop[0].candidate
             returnValues[i][:] = newpoint
-            self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
+            self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=False)
 
         self.X = np.copy(initX)
         self.y = np.copy(inity)
@@ -313,7 +315,6 @@ class kriging(matrixops):
         for lo, hi in zip(bounder.lower_bound, bounder.upper_bound):
             chromosome.append(random.uniform(lo, hi))
         return chromosome
-
 
     def no_improvement_termination(self, population, num_generations, num_evaluations, args):
         """Return True if the best fitness does not change for a number of generations of if the max number
