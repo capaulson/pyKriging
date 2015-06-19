@@ -35,10 +35,9 @@ class regression_kriging(matrixops):
         self.sp = samplingplan(self.k)
         self.updateData()
         self.updateModel()
-
         self.thetamin = 1e-4
-        self.thetamax = 100
-        self.pmin = 1
+        self.thetamax =100
+        self.pmin = 1.81231
         self.pmax = 2
 
         # Setup functions for tracking history
@@ -172,14 +171,15 @@ class regression_kriging(matrixops):
             # print Exception, err
             raise Exception("bad params")
 
-    def predict(self, X):
+    def predict(self, X, norm=True):
         '''
         This function returns the prediction of the model at the real world coordinates of X
         :param X: Design variable to evaluate
         :return: Returns the 'real world' predicted value
         '''
         X = copy.deepcopy(X)
-        X = self.normX(X)
+        if norm:
+            X = self.normX(X)
         return self.inversenormy(self.predict_normalized(X))
 
     def predict_var(self, X, norm=True):
@@ -373,7 +373,7 @@ class regression_kriging(matrixops):
             # ea.observer = inspyred.ec.observers.stats_observer
             final_pop = ea.evolve(generator=self.generate_population,
                                   evaluator=self.fittingObjective,
-                                  pop_size=300,
+                                  pop_size=150,
                                   maximize=False,
                                   bounder=ec.Bounder(lowerBound, upperBound),
                                   max_evaluations=30000,
@@ -388,7 +388,7 @@ class regression_kriging(matrixops):
             ea.terminator = self.no_improvement_termination
             final_pop = ea.evolve(generator=self.generate_population,
                                   evaluator=self.fittingObjective,
-                                  pop_size=300,
+                                  pop_size=50,
                                   maximize=False,
                                   bounder=ec.Bounder(lowerBound, upperBound),
                                   max_evaluations=30000,

@@ -252,7 +252,7 @@ class kriging(matrixops):
             fitness.append(-1 * self.expimp(entry))
         return fitness
 
-    def infill(self, points, method='error'):
+    def infill(self, points, method='error', addPoint=True):
         '''
         The function identifies where new points are needed in the model.
         :param points: The number of points to add to the model. Multiple points are added via imputation.
@@ -287,7 +287,8 @@ class kriging(matrixops):
             final_pop.sort(reverse=True)
             newpoint = final_pop[0].candidate
             returnValues[i][:] = newpoint
-            self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=False)
+            if addPoint:
+                self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
 
         self.X = np.copy(initX)
         self.y = np.copy(inity)
