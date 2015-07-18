@@ -18,6 +18,7 @@ from inspyred import ec
 import math as m
 
 
+
 class kriging(matrixops):
     def __init__(self, X, y, testfunction=None, name='', testPoints=None, **kwargs):
         self.X = copy.deepcopy(X)
@@ -36,7 +37,7 @@ class kriging(matrixops):
         self.updateData()
         self.updateModel()
 
-        self.thetamin = 1e-4
+        self.thetamin = 1e-5
         self.thetamax = 100
         self.pmin = 1
         self.pmax = 2
@@ -51,6 +52,7 @@ class kriging(matrixops):
         self.history['adjrsquared'] = [0]
         self.history['chisquared'] = [1000]
         self.history['lastPredictedPoints'] = []
+        self.history['avgMSE'] = []
         if testPoints:
             self.history['pointData'] = []
             self.testPoints = self.sp.rlh(testPoints)
@@ -116,10 +118,10 @@ class kriging(matrixops):
         for i in range(self.k):
             self.normRange.append([min(self.X[:, i]), max(self.X[:, i])])
 
-        print self.X
+        # print self.X
         for i in range(self.n):
             self.X[i] = self.normX(self.X[i])
-        print self.X
+        #print self.X
 
         self.ynormRange.append(min(self.y))
         self.ynormRange.append(max(self.y))
@@ -687,6 +689,8 @@ class kriging(matrixops):
         self.history['neglnlike'].append(self.NegLnLike)
         self.history['theta'].append(copy.deepcopy(self.theta))
         self.history['p'].append(copy.deepcopy(self.pl))
+
+        self.history['avgMSE'].append(self.calcuatemeanMSE(points=self.testPoints)[0])
 
         currentPredictions = []
         if self.history['pointData']!=None:

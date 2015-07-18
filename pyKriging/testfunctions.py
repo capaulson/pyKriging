@@ -84,7 +84,7 @@ class testfunctions():
         noiseFree =  ((a*( X2 - b*X1**2 + c*X1 - d )**2 + e*(1-ff)*np.cos(X1) + e)+5*x)
         withNoise=[]
         for i in noiseFree:
-            withNoise.append(i + np.random.standard_normal()*7)
+            withNoise.append(i + np.random.standard_normal()*15)
         return np.array(withNoise)
 
 

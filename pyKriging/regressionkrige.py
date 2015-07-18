@@ -167,9 +167,9 @@ class regression_kriging(matrixops):
         try:
             self.regupdatePsi()
         except Exception, err:
-            # pass
+            pass
             # print Exception, err
-            raise Exception("bad params")
+            # raise Exception("bad params")
 
     def predict(self, X, norm=True):
         '''

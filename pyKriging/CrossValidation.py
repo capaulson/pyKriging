@@ -3,21 +3,24 @@
 """
 import numpy as np
 from matplotlib import pyplot as plt
-from pyKrige.krige import kriging
+import pyKriging
+from pyKriging.krige import kriging
+from pyKriging.utilities import *
 import random
 import scipy.stats as stats
 
 
 class Cross_Validation():
 
-    def __init__(self, X, y, name):
+    def __init__(self, model, name=None):
         """
         X- sampling plane
         y- Objective function evaluations
         name- the name of the model
         """
-        self.X = X
-        self.y = y
+        self.model = model
+        self.X = self.model.X
+        self.y = self.model.y
         self.n, self.k = np.shape(self.X)
         self.predict_list, self.predict_varr, self.scvr = [], [], []
         self.name = name
@@ -208,5 +211,20 @@ class Cross_Validation():
         plt.xlabel('SCVR')
         plt.ylabel('Standard quantile')
         plt.show()
+
+    def leave_n_out(self, q=5):
+        '''
+        :param q: the numer of groups to split the model data inot
+        :return:
+        '''
+        mseArray = []
+        for i in splitArrays(self.model,5):
+            testk = kriging( i[0], i[1] )
+            testk.train()
+            for j in range(len(i[2])):
+                mseArray.append(mse(i[3][j], testk.predict( i[2][j] )))
+            del(testk)
+        return np.average(mseArray), np.std(mseArray)
+
 
 ## Example Use Case:

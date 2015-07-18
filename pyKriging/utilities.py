@@ -9,7 +9,7 @@ def norm(x):
     return x-min(x)
 
 def saveModel(model, filePath):
-    pickle.dump(model, open(filePath, 'w'))
+    pickle.dump(model, open(filePath, 'w'), byref=True)
 
 def loadModel(filePath):
     return pickle.load(open(filePath,'r'))
