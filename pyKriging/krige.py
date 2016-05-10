@@ -170,7 +170,7 @@ class kriging(matrixops):
         try:
             self.updatePsi()
         except Exception, err:
-            # pass
+            #pass
             # print Exception, err
             raise Exception("bad params")
 
@@ -479,7 +479,7 @@ class kriging(matrixops):
             import mayavi.mlab as mlab
 
             predictFig = mlab.figure(figure='predict')
-            errorFig = mlab.figure(figure='error')
+            # errorFig = mlab.figure(figure='error')
             if self.testfunction:
                 truthFig = mlab.figure(figure='test')
             dx = 1
@@ -490,7 +490,7 @@ class kriging(matrixops):
             for i in range(X.shape[0]):
                 for j in range(X.shape[1]):
                     for k1 in range(X.shape[2]):
-                        errscalars[i][j][k1] = self.predicterr_normalized([X[i][j][k1], Y[i][j][k1], Z[i][j][k1]])
+                        # errscalars[i][j][k1] = self.predicterr_normalized([X[i][j][k1], Y[i][j][k1], Z[i][j][k1]])
                         scalars[i][j][k1] = self.predict_normalized([X[i][j][k1], Y[i][j][k1], Z[i][j][k1]])
 
             if self.testfunction:
@@ -505,12 +505,13 @@ class kriging(matrixops):
             # obj = mlab.contour3d(scalars, contours=10, transparent=True)
             plot = mlab.contour3d(scalars, contours=15, transparent=True, figure=predictFig)
             plot.compute_normals = False
-            errplt = mlab.contour3d(errscalars, contours=15, transparent=True, figure=errorFig)
-            errplt.compute_normals = False
+            # errplt = mlab.contour3d(errscalars, contours=15, transparent=True, figure=errorFig)
+            # errplt.compute_normals = False
             if show:
                 mlab.show()
 
         if self.k==2:
+
             fig = pylab.figure(figsize=(8,6))
             samplePoints = zip(*self.X)
             # Create a set of data to plot
@@ -518,8 +519,8 @@ class kriging(matrixops):
             x = np.linspace(self.normRange[0][0], self.normRange[0][1], num=plotgrid)
             y = np.linspace(self.normRange[1][0], self.normRange[1][1], num=plotgrid)
 
-            x = np.linspace(0, 1, num=plotgrid)
-            y = np.linspace(0, 1, num=plotgrid)
+            # x = np.linspace(0, 1, num=plotgrid)
+            # y = np.linspace(0, 1, num=plotgrid)
             X, Y = np.meshgrid(x, y)
 
             # Predict based on the optimized results
