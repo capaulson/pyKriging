@@ -515,6 +515,7 @@ class regression_kriging(matrixops):
                 mlab.show()
 
         if self.k==2:
+
             fig = pylab.figure(figsize=(8,6))
             samplePoints = zip(*self.X)
             # Create a set of data to plot
@@ -522,8 +523,8 @@ class regression_kriging(matrixops):
             x = np.linspace(self.normRange[0][0], self.normRange[0][1], num=plotgrid)
             y = np.linspace(self.normRange[1][0], self.normRange[1][1], num=plotgrid)
 
-            x = np.linspace(0, 1, num=plotgrid)
-            y = np.linspace(0, 1, num=plotgrid)
+            # x = np.linspace(0, 1, num=plotgrid)
+            # y = np.linspace(0, 1, num=plotgrid)
             X, Y = np.meshgrid(x, y)
 
             # Predict based on the optimized results
