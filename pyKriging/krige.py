@@ -34,8 +34,8 @@ class kriging(matrixops):
         self.ynormRange = []
         self.normalizeData()
         self.sp = samplingplan.samplingplan(self.k)
-        self.updateData()
-        self.updateModel()
+        #self.updateData()
+        #self.updateModel()
 
         self.thetamin = 1e-5
         self.thetamax = 100
