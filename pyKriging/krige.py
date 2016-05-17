@@ -366,7 +366,7 @@ class kriging(matrixops):
         rand.seed(int(time()))
 
         # If the optimizer option is PSO, run the PSO algorithm
-        if optimizer is 'pso':
+        if optimizer == 'pso':
             ea = inspyred.swarm.PSO(Random())
             ea.terminator = self.no_improvement_termination
             ea.topology = inspyred.swarm.topologies.ring_topology
@@ -383,7 +383,7 @@ class kriging(matrixops):
             final_pop.sort(reverse=True)
 
         # If not using a PSO search, run the GA
-        elif optimizer is 'ga':
+        elif optimizer == 'ga':
             ea = inspyred.ec.GA(Random())
             ea.terminator = self.no_improvement_termination
             final_pop = ea.evolve(generator=self.generate_population,
