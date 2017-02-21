@@ -32,7 +32,7 @@ class samplingplan():
 
         #exclude 0
 
-        for i in xrange(0,self.k):
+        for i in range(0,self.k):
             X[:,i] = np.transpose(np.random.permutation(np.arange(1,n+1,1)))
 
         if Edges == 1:
@@ -63,14 +63,17 @@ class samplingplan():
 
 
             """
-            if not generation:
+            ## TODO: This code isnt working in the Python3 branch.
+
+            # if not generation:
+
                 # Check for existing LHC sampling plans
-                if os.path.isfile('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n)):
-                    X = pickle.load(open('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n), 'r'))
-                    return X
-                else:
-                    print self.path
-                    print 'SP not found on disk, generating it now.'
+                # if os.path.isfile('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n)):
+                #     X = pickle.load(open('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n), 'rb'))
+                #     return X
+                # else:
+                #     print(self.path)
+                #     print('SP not found on disk, generating it now.')
 
             #list of qs to optimise Phi_q for
             q = [1,2,5,10,20,50,100]
@@ -84,13 +87,13 @@ class samplingplan():
 
             X3D = np.zeros((n,self.k,len(q)))
             #for each q optimize Phi_q
-            for i in xrange(len(q)):
-                print ('Now_optimizing_for_q = %d \n' %q[i])
+            for i in range(len(q)):
+                print(('Now_optimizing_for_q = %d \n' %q[i]))
                 X3D[:,:,i] = self.mmlhs(XStart, population, iterations, q[i])
 
             #sort according to the Morris-Mitchell criterion
             Index = self.mmsort(X3D,p)
-            print ('Best_lh_found_using_q = %d \n' %q[Index[1]])
+            print(('Best_lh_found_using_q = %d \n' %q[Index[1]]))
 
             #and the Latin hypercube with the best space-filling properties is
 
@@ -260,7 +263,7 @@ class samplingplan():
     #                d[((i-1)*n - (i-1)*i/2 + j - i  )] = np.linalg.norm((X[i,:] - X[j,:]),2)
 
         #an alternative way of the above loop
-        list = [(i,j) for i in xrange(n-1) for j in xrange(i+1,n)]
+        list = [(i,j) for i in range(n-1) for j in range(i+1,n)]
         for k,l in enumerate(list):
             d[k] = np.linalg.norm((X[l[0],:]-X[l[1],:]),p)
 
@@ -272,7 +275,7 @@ class samplingplan():
         J = np.zeros(np.size(distinct_d))
 
         #generate multiplicity array
-        for i in xrange(len(distinct_d)):
+        for i in range(len(distinct_d)):
             #J(i) will contain the number of pairs separated
             #by the distance distinct_d(i)
             J[i]=np.sum(self.ismember(d,distinct_d[i]))
@@ -325,7 +328,7 @@ class samplingplan():
             #generate vector c such that c(i)=1 if V1(i)>V2(i), c(i)=2 if V1(i)<V2(i)
             #c(i)=0 otherwise
             c = np.zeros(m)
-            for i in xrange(m):
+            for i in range(m):
                 if np.greater(V1[i],V2[i]) == True:
                     c[i] = 1
                 elif np.less(V1[i],V2[i]) == True:
@@ -354,6 +357,6 @@ if __name__=='__main__':
     # print optimalLHC()
 
     sp = samplingplan(k=2)
-    print sp.fullfactorial()
-    print sp.rlh(15)
-    print sp.optimallhc(16)
+    print(sp.fullfactorial())
+    print(sp.rlh(15))
+    print(sp.optimallhc(16))

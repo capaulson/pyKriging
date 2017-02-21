@@ -13,7 +13,7 @@ testfun = pyKriging.testfunctions().branin
 # We generate our observed values based on our sampling plan and the test function
 y = testfun(X)
 
-print 'Setting up the Kriging Model'
+print('Setting up the Kriging Model')
 
 # Now that we have our initial data, we can create an instance of a kriging model
 k = kriging(X, y, testfunction=testfun, name='simple', testPoints=250)
@@ -23,14 +23,14 @@ k.snapshot()
 for i in range(5):
     newpoints = k.infill(2)
     for point in newpoints:
-        print 'Adding point {}'.format(point)
+        print('Adding point {}'.format(point))
         k.addPoint(point, testfun(point)[0])
     k.train()
     k.snapshot()
 
 # #And plot the model
 
-print 'Now plotting final results...'
+print('Now plotting final results...')
 k.plot()
 
 

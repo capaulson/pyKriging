@@ -40,7 +40,7 @@ class coKriging():
         self.one=ones([self.ne+self.nc,1])
         self.y=[self.yc, self.ye]
 
-        print 'here1'
+        print('here1')
 
     def reorder_data(self):
         xe = []
@@ -53,7 +53,7 @@ class coKriging():
 
         for enu,entry in enumerate(self.Xc):
             if entry in self.Xe:
-                print 'Found this value in XE!!'
+                print('Found this value in XE!!')
                 for enu1,test in enumerate(self.Xe):
                     # if entry[0] == test[0] and  entry[1] == test[1]:
                     if entry == test:
@@ -87,25 +87,25 @@ class coKriging():
     def traincheap(self):
         self.kc = kriging(self.Xc, self.yc)
         self.kc.train()
-        print
+        print()
 
 
     def distanceXc(self):
         self.distanceXc = np.zeros((self.nc,self.nc, self.k))
         for i in range( self.nc ):
-            for j in xrange(i+1,self.nc):
+            for j in range(i+1,self.nc):
                 self.distanceXc[i][j] = np.abs((self.Xc[i]-self.Xc[j]))
 
     def distanceXe(self):
         self.distanceXe = np.zeros((self.ne,self.ne, self.k))
         for i in range( self.ne ):
-            for j in xrange(i+1,self.ne):
+            for j in range(i+1,self.ne):
                 self.distanceXe[i][j] = np.abs((self.Xe[i]-self.Xe[j]))
 
     def distanceXcXe(self):
         self.distanceXcXe = np.zeros((self.nc,self.ne, self.k))
         for i in range( self.nc ):
-            for j in xrange(self.ne):
+            for j in range(self.ne):
                 self.distanceXcXe[i][j] = np.abs((self.Xc[i]-self.Xe[j]))
 
 
@@ -118,13 +118,13 @@ class coKriging():
         # print self.pc
         # print self.distanceXc
         newPsicXc = np.exp(-np.sum(self.thetac*np.power(self.distanceXc,self.pc), axis=2))
-        print newPsicXc[0]
+        print(newPsicXc[0])
         self.PsicXc = np.triu(newPsicXc,1)
         self.PsicXc = self.PsicXc + self.PsicXc.T + np.mat(eye(self.nc))+np.multiply(np.mat(eye(self.nc)),np.spacing(1))
         self.UPsicXc = np.linalg.cholesky(self.PsicXc)
         self.UPsicXc = self.UPsicXc.T
-        print self.PsicXc[0]
-        print self.UPsicXc
+        print(self.PsicXc[0])
+        print(self.UPsicXc)
         exit()
 
         newPsicXe = np.exp(-np.sum(self.thetac*np.power(self.distanceXe,self.pc), axis=2))
@@ -149,22 +149,22 @@ class coKriging():
         self.muc = c/f
         # This only works if yc is transposed, then its a scalar under two layers of arrays. Correct? Not sure
 
-        print 'y',self.yd.T
+        print('y',self.yd.T)
         a = np.linalg.solve(self.UPsicXe.T, self.yd)
-        print 'a',a
+        print('a',a)
         b = np.linalg.solve(self.UPsicXe, a)
-        print 'b', b
+        print('b', b)
         c = ones([self.ne,1]) * b
-        print 'c', c
+        print('c', c)
 
         d = np.linalg.solve(self.UPsicXe.T, ones([self.ne,1], dtype=float))
-        print d
+        print(d)
 
         e = np.linalg.solve(self.UPsicXe, d)
-        print e
+        print(e)
 
         f = ones([self.ne,1]).T * e
-        print f
+        print(f)
 
         self.mud= c/f
 
@@ -175,9 +175,9 @@ class coKriging():
 
 
 
-        print self.ne
-        print self.mud
-        print self.UPsicXe.T
+        print(self.ne)
+        print(self.mud)
+        print(self.UPsicXe.T)
         a = np.linalg.solve(self.UPsicXe.T,(self.yd-ones([self.ne,1])*self.mud))/self.ne
         b = np.linalg.solve(self.UPsicXe, a)
         self.SigmaSqrd=(self.yd-ones([self.ne,1])*self.mud).T* b
@@ -197,7 +197,7 @@ def fe(X):
     return np.power(X[:,0], 2) + np.power(X[:,1], 2)
 
 if __name__=='__main__':
-    import samplingplan
+    from . import samplingplan
     import random
     sp = samplingplan.samplingplan(2)
     X = sp.optimallhc(20)

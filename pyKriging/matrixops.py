@@ -1,4 +1,4 @@
-from __future__ import division, absolute_import
+
 import numpy as np
 from numpy.matlib import rand,zeros,ones,empty,eye
 import scipy
@@ -17,8 +17,8 @@ class matrixops():
 
     def updateData(self):
         self.distance = np.zeros((self.n,self.n, self.k))
-        for i in xrange(self.n):
-            for j in xrange(i+1,self.n):
+        for i in range(self.n):
+            for j in range(i+1,self.n):
                 self.distance[i,j]= np.abs((self.X[i]-self.X[j]))
 
     def updatePsi(self):
@@ -80,15 +80,15 @@ class matrixops():
         for i in range(self.n):
             try:
                 self.psi[i]=np.exp(-np.sum(self.theta*np.power((np.abs(self.X[i]-x)),self.pl)))
-            except Exception,e:
-                print Exception,e
+            except Exception as e:
+                print(Exception,e)
         try:
             SSqr=self.SigmaSqr*(1-self.psi.T.dot(np.linalg.solve(self.U, np.linalg.solve(self.U.T,self.psi))))
-        except Exception, e:
-            print self.U.shape
-            print self.SigmaSqr.shape
-            print self.psi.shape
-            print Exception,e
+        except Exception as e:
+            print(self.U.shape)
+            print(self.SigmaSqr.shape)
+            print(self.psi.shape)
+            print(Exception,e)
             pass
 
         SSqr = np.abs(SSqr[0])
@@ -98,12 +98,12 @@ class matrixops():
         for i in range(self.n):
             try:
                 self.psi[i]=np.exp(-np.sum(self.theta*np.power((np.abs(self.X[i]-x)),self.pl)))
-            except Exception,e:
-                print Exception,e
+            except Exception as e:
+                print(Exception,e)
         try:
             SSqr=self.SigmaSqr*(1+self.Lambda-self.psi.T.dot(np.linalg.solve(self.U, np.linalg.solve(self.U.T,self.psi))))
-        except Exception, e:
-            print Exception,e
+        except Exception as e:
+            print(Exception,e)
             pass
 
         SSqr = np.abs(SSqr[0])

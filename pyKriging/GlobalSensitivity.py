@@ -83,8 +83,8 @@ if __name__== '__main__':
     data = np.genfromtxt(dataFile, delimiter=' ', invalid_raise=False)
     X = data[:,[3,4]]
     VAS = data[:, [5]][:,0]
-    print VAS
+    print(VAS)
     AASM = data[:, [6]][:,0]
-    print AASM
+    print(AASM)
     VAD = data[:, [7]][:,0]
-    print VAD
+    print(VAD)

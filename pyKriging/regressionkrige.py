@@ -1,10 +1,10 @@
-from __future__ import division
+
 
 __author__ = 'chrispaulson'
 import numpy as np
 import scipy
 from scipy.optimize import minimize
-from matrixops import matrixops
+from .matrixops import matrixops
 import copy
 from matplotlib import pyplot as plt
 import pylab
@@ -143,7 +143,7 @@ class regression_kriging(matrixops):
             try:
                 self.updateModel()
             except:
-                print 'Couldnt update the model with these hyperparameters, retraining'
+                print('Couldnt update the model with these hyperparameters, retraining')
                 self.train()
             else:
                 break
@@ -166,7 +166,7 @@ class regression_kriging(matrixops):
         '''
         try:
             self.regupdatePsi()
-        except Exception, err:
+        except Exception as err:
             pass
             # print Exception, err
             # raise Exception("bad params")
@@ -444,7 +444,7 @@ class regression_kriging(matrixops):
                 self.updateModel()
                 self.regneglikelihood()
                 f = self.NegLnLike
-            except Exception, e:
+            except Exception as e:
                 # print 'Failure in NegLNLike, failing the run'
                 # print Exception, e
                 f = 10000
@@ -466,7 +466,7 @@ class regression_kriging(matrixops):
             self.updateModel()
             self.regneglikelihood()
             f = self.NegLnLike
-        except Exception, e:
+        except Exception as e:
             # print 'Failure in NegLNLike, failing the run'
             # print Exception, e
             f = 10000
@@ -517,7 +517,7 @@ class regression_kriging(matrixops):
         if self.k==2:
 
             fig = pylab.figure(figsize=(8,6))
-            samplePoints = zip(*self.X)
+            samplePoints = list(zip(*self.X))
             # Create a set of data to plot
             plotgrid = 61
             x = np.linspace(self.normRange[0][0], self.normRange[0][1], num=plotgrid)
@@ -549,7 +549,7 @@ class regression_kriging(matrixops):
             ax = fig.add_subplot(221)
             if self.testfunction:
                 # Setup the truth function
-                zt = self.testfunction( np.array(zip(np.ravel(X), np.ravel(Y))) )
+                zt = self.testfunction( np.array(list(zip(np.ravel(X), np.ravel(Y)))) )
                 ZT = zt.reshape(X.shape)
                 CS = pylab.contour(X,Y,ZT,contour_levels ,colors='k',zorder=2)
 
@@ -620,7 +620,7 @@ class regression_kriging(matrixops):
                 mlab.savefig('%s_actual.wrl' % name, figure=truthFig)
             mlab.close(all=True)
         if self.k == 2:
-            samplePoints = zip(*self.X)
+            samplePoints = list(zip(*self.X))
             # Create a set of data to plot
             plotgrid = 61
             x = np.linspace(0, 1, num=plotgrid)
@@ -640,8 +640,8 @@ class regression_kriging(matrixops):
             if self.testfunction:
                 # Setup the truth function
                 zt = self.testfunction(np.array(
-                    zip(np.ravel((X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]),
-                        np.ravel((Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]))))
+                    list(zip(np.ravel((X * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]),
+                        np.ravel((Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0])))))
                 ZT = zt.reshape(X.shape)
 
             # Plot real world values
