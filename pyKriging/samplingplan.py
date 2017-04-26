@@ -278,12 +278,9 @@ class samplingplan():
         for i in range(len(distinct_d)):
             #J(i) will contain the number of pairs separated
             #by the distance distinct_d(i)
-            J[i]=np.sum(self.ismember(d,distinct_d[i]))
+            J[i] = np.sum(d == distinct_d[i])
 
         return J, distinct_d
-
-    def ismember(self, A, B):
-        return [ np.sum(a == B) for a in A ]
 
     def mm(self,X1,X2,p=1):
         """
