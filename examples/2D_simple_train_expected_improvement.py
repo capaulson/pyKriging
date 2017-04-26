@@ -1,3 +1,4 @@
+from __future__ import print_function
 __author__ = 'cpaulson'
 import pyKriging
 from pyKriging.krige import kriging
@@ -15,7 +16,7 @@ y = testfun(X)
 optimizer = 'ga'
 
 # Now that we have our initial data, we can create an instance of a kriging model
-print 'Setting up the Kriging Model'
+print('Setting up the Kriging Model')
 k = kriging(X, y, testfunction=testfun, name='simple_ei', testPoints=300)
 k.train(optimizer=optimizer)
 k.snapshot()
@@ -25,7 +26,7 @@ k.snapshot()
 for i in range(5):
     newpoints = k.infill(1, method='error')
     for point in newpoints:
-        print 'Adding point {}'.format(point)
+        print('Adding point {}'.format(point))
         k.addPoint(point, testfun(point)[0])
     k.train(optimizer=optimizer)
     k.snapshot()
@@ -34,13 +35,13 @@ for i in range(5):
 for i in range(5):
     newpoints = k.infill(1, method='ei')
     for point in newpoints:
-        print 'Adding point {}'.format(point)
+        print('Adding point {}'.format(point))
         k.addPoint(point, testfun(point)[0])
     k.train(optimizer=optimizer)
     k.snapshot()
 
 # And plot the results
-print 'Now plotting final results...'
+print('Now plotting final results...')
 k.plot()
 
 
