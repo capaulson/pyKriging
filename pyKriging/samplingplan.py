@@ -251,7 +251,7 @@ class samplingplan():
         n = np.size(X[:,1])
 
         #computes the distances between all pairs of points
-        d = np.zeros((n*(n-1)/2))
+        d = np.zeros((n*(n-1)//2))
 
 
 
