@@ -269,16 +269,7 @@ class samplingplan():
 
 
         #remove multiple occurences
-        distinct_d = np.unique(d)
-
-        #pre-allocate memory for J
-        J = np.zeros(np.size(distinct_d))
-
-        #generate multiplicity array
-        for i in range(len(distinct_d)):
-            #J(i) will contain the number of pairs separated
-            #by the distance distinct_d(i)
-            J[i] = np.sum(d == distinct_d[i])
+        distinct_d, J = np.unique(d, return_counts=True)
 
         return J, distinct_d
 
