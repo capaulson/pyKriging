@@ -158,14 +158,14 @@ class samplingplan():
         [n,k] = np.shape(X_pert)
 
         for pert_count in range(0,PertNum):
-            col = m.floor(np.random.rand(1)*k)
+            col = int(m.floor(np.random.rand(1)*k))
 
             #Choosing two distinct random points
             el1 = 0
             el2 = 0
             while el1 == el2:
-                el1 = m.floor(np.random.rand(1)*n)
-                el2 = m.floor(np.random.rand(1)*n)
+                el1 = int(m.floor(np.random.rand(1)*n))
+                el2 = int(m.floor(np.random.rand(1)*n))
 
             #swap the two chosen elements
             arrbuffer = X_pert[el1,col]
@@ -251,7 +251,7 @@ class samplingplan():
         n = np.size(X[:,1])
 
         #computes the distances between all pairs of points
-        d = np.zeros((n*(n-1)/2))
+        d = np.zeros((n*(n-1)//2))
 
 
 
@@ -269,21 +269,9 @@ class samplingplan():
 
 
         #remove multiple occurences
-        distinct_d = np.unique(d)
-
-        #pre-allocate memory for J
-        J = np.zeros(np.size(distinct_d))
-
-        #generate multiplicity array
-        for i in range(len(distinct_d)):
-            #J(i) will contain the number of pairs separated
-            #by the distance distinct_d(i)
-            J[i]=np.sum(self.ismember(d,distinct_d[i]))
+        distinct_d, J = np.unique(d, return_counts=True)
 
         return J, distinct_d
-
-    def ismember(self, A, B):
-        return [ np.sum(a == B) for a in A ]
 
     def mm(self,X1,X2,p=1):
         """

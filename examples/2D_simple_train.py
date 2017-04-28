@@ -1,3 +1,4 @@
+from __future__ import print_function
 __author__ = 'cpaulson'
 import pyKriging
 from pyKriging.krige import kriging
@@ -23,7 +24,7 @@ k.snapshot()
 for i in range(5):
     newpoints = k.infill(2)
     for point in newpoints:
-        print('Adding point {}'.format(point))
+        print(('Adding point {}'.format(point)))
         k.addPoint(point, testfun(point)[0])
     k.train()
     k.snapshot()

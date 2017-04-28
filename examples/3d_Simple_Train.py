@@ -1,3 +1,4 @@
+from __future__ import print_function
 import pyKriging
 from pyKriging.krige import kriging
 from pyKriging.samplingplan import samplingplan
@@ -23,13 +24,13 @@ k.snapshot()
 # The infill method can be  used for this
 # In this example, we will add nine points in three batches. The model gets trained after each stage
 for i in range(10):
-    print k.history['rsquared'][-1]
-    print 'Infill iteration {0}'.format(i + 1)
+    print(k.history['rsquared'][-1])
+    print('Infill iteration {0}'.format(i + 1))
     infillPoints = k.infill(10)
 
     # Evaluate the infill points and add them back to the Kriging model
     for point in infillPoints:
-        print 'Adding point {}'.format(point)
+        print('Adding point {}'.format(point))
         k.addPoint(point, testfun(point)[0])
 
     # Retrain the model with the new points added in to the model

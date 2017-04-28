@@ -1,3 +1,4 @@
+from __future__ import print_function
 __author__ = 'cpaulson'
 
 import sys
@@ -14,8 +15,8 @@ def cheap(X):
     C=-5
     D=0
 
-    print X
-    print ((X+D)*6-2)
+    print(X)
+    print(((X+D)*6-2))
     return A*np.power( ((X+D)*6-2), 2 )*np.sin(((X+D)*6-2)*2)+((X+D)-0.5)*B+C
 
 def expensive(X):
@@ -30,7 +31,7 @@ ye = expensive(Xe)
 
 ck = coKriging.coKriging(Xc, yc, Xe, ye)
 ck.thetac = np.array([1.2073])
-print ck.Xc
+print(ck.Xc)
 ck.updateData()
 ck.updatePsi()
 ck.neglnlikehood()

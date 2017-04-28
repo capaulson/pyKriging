@@ -1,3 +1,4 @@
+from __future__ import print_function
 __author__ = 'cpaulson'
 import pyKriging
 from pyKriging.krige import kriging
@@ -15,7 +16,7 @@ testfun = pyKriging.testfunctions().branin
 # We generate our observed values based on our sampling plan and the test function
 y = testfun(X)
 
-print 'Setting up the Kriging Model'
+print('Setting up the Kriging Model')
 cvMSE = []
 # Now that we have our initial data, we can create an instance of a kriging model
 k = kriging(X, y, testfunction=testfun, name='simple', testPoints=300)
@@ -26,7 +27,7 @@ k.snapshot()
 
 k.plot()
 for i in range(15):
-    print i
+    print(i)
     newpoints = k.infill(1)
     for point in newpoints:
         # print 'Adding point {}'.format(point)
@@ -43,15 +44,15 @@ k.plot()
 
 # #And plot the model
 
-print 'Now plotting final results...'
+print('Now plotting final results...')
 # k.plot()
 
 
-print k.testPoints
-print k.history['points']
-print k.history['rsquared']
-print k.history['avgMSE']
-print cvMSE
+print(k.testPoints)
+print(k.history['points'])
+print(k.history['rsquared'])
+print(k.history['avgMSE'])
+print(cvMSE)
 from matplotlib import pylab as plt
 plt.plot(range(len(k.history['rsquared'])), k.history['rsquared'])
 plt.plot(range(len(cvMSE)), cvMSE)
