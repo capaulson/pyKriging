@@ -155,14 +155,14 @@ class samplingplan():
         [n,k] = np.shape(X_pert)
 
         for pert_count in range(0,PertNum):
-            col = m.floor(np.random.rand(1)*k)
+            col = int(m.floor(np.random.rand(1)*k))
 
             #Choosing two distinct random points
             el1 = 0
             el2 = 0
             while el1 == el2:
-                el1 = m.floor(np.random.rand(1)*n)
-                el2 = m.floor(np.random.rand(1)*n)
+                el1 = int(m.floor(np.random.rand(1)*n))
+                el2 = int(m.floor(np.random.rand(1)*n))
 
             #swap the two chosen elements
             arrbuffer = X_pert[el1,col]
