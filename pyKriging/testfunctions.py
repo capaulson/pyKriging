@@ -1,4 +1,4 @@
-from __future__ import division
+
 import numpy as np
 
 class testfunctions():
@@ -192,10 +192,10 @@ class testfunctions():
 
 if __name__=='__main__':
     a = testfunctions()
-    print a.squared([1,1,1])
-    print a.squared([[1,1,1],[2,2,2]])
-    print a.cubed([[1,1,1],[2,2,2]])
-    print a.stybtang([[1,1,1],[2,2,2]])
-    print a.curretal88exp([[1,1,1],[2,2,2]])
-    print a.cosine([[1,1,1],[2,2,2]])
-    print a.runge([[1,1,1],[2,2,2]])
+    print(a.squared([1,1,1]))
+    print(a.squared([[1,1,1],[2,2,2]]))
+    print(a.cubed([[1,1,1],[2,2,2]]))
+    print(a.stybtang([[1,1,1],[2,2,2]]))
+    print(a.curretal88exp([[1,1,1],[2,2,2]]))
+    print(a.cosine([[1,1,1],[2,2,2]]))
+    print(a.runge([[1,1,1],[2,2,2]]))
