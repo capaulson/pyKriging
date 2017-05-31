@@ -1,4 +1,4 @@
-
+﻿
 import numpy as np
 
 class testfunctions():
@@ -186,12 +186,38 @@ class testfunctions():
             y = np.append(y, np.cos(np.sum(X[i])))
         return y
 
+    def rastrigin(self, x):
+        """
+        2D Rastrigin function:
+            with global minima: 0 at x = [0, 0]
+        :param x:
+        :return:
+        """
+        y = [0.0] * 1  # Initialize array for objectives F(X)
 
+        y[0] = 20 + x[0] ** 2 + x[1] ** 2 - 10 * (np.cos(2 * np.pi * x[0]) + np.cos(2 * np.pi * x[1]))
+        return y
+
+    def rosenbrock(self, x):
+        '''
+        Rosenbrock function(Any order, usually 2D and 10D, sometimes larger dimension is tested)
+        with global minima: 0 at x = [1] * dimension
+        :param x:
+        :return:
+        '''
+        y = [0.0] * 1
+        function_sum = 0
+        for i in np.arange(0, len(x)-1):
+            function_sum += (1 - x[i]) ** 2 + 100 * ((x[i + 1] - x[i] ** 2) ** 2)
+        y[0] = function_sum
+        return y
 
 
 
 if __name__=='__main__':
     a = testfunctions()
+    print(a.rastrigin([0, 0]))
+    print(a.rosenbrock([1] * 10))
     print(a.squared([1,1,1]))
     print(a.squared([[1,1,1],[2,2,2]]))
     print(a.cubed([[1,1,1],[2,2,2]]))
@@ -199,3 +225,4 @@ if __name__=='__main__':
     print(a.curretal88exp([[1,1,1],[2,2,2]]))
     print(a.cosine([[1,1,1],[2,2,2]]))
     print(a.runge([[1,1,1],[2,2,2]]))
+
