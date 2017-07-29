@@ -81,8 +81,12 @@ class kriging(matrixops):
         :return X: An array normed to our model range of [0,1] for each dimension
         '''
         X = copy.deepcopy(X)
-        for i in range(self.k):
-            X[i] = (X[i] - self.normRange[i][0]) / float(self.normRange[i][1] - self.normRange[i][0])
+        if type(X) is np.float64:
+            # print self.normRange
+            return np.array( (X - self.normRange[0][0]) / float(self.normRange[0][1] - self.normRange[0][0]) )
+        else:
+            for i in range(self.k):
+                X[i] = (X[i] - self.normRange[i][0]) / float(self.normRange[i][1] - self.normRange[i][0])
         return X
 
     def inversenormX(self, X):
@@ -121,7 +125,6 @@ class kriging(matrixops):
         # print self.X
         for i in range(self.n):
             self.X[i] = self.normX(self.X[i])
-        #print self.X
 
         self.ynormRange.append(min(self.y))
         self.ynormRange.append(max(self.y))
@@ -288,7 +291,7 @@ class kriging(matrixops):
                                   num_inputs=self.k)
             final_pop.sort(reverse=True)
             newpoint = final_pop[0].candidate
-            returnValues[i][:] = newpoint
+            returnValues[i][:] = self.inversenormX(newpoint)
             if addPoint:
                 self.addPoint(returnValues[i], self.predict(returnValues[i]), norm=True)
 
