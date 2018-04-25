@@ -33,5 +33,3 @@ for i in range(5):
 
 print('Now plotting final results...')
 k.plot()
-
-
