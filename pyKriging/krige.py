@@ -648,28 +648,30 @@ class kriging(matrixops):
             Y = (Y * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
             spx = (self.X[:, 0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
             spy = (self.X[:, 1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
-            fig = plt.figure(figsize=(8, 6))
-            # contour_levels = np.linspace(min(zt), max(zt),50)
-            contour_levels = 15
-            plt.plot(spx, spy, 'ow')
-            cs = plt.colorbar()
 
-            if self.testfunction:
-                pass
-            plt.plot(spx, spy, 'ow')
-
-            cs = plt.colorbar()
-            plt.plot(spx, spy, 'ow')
-
-            ax = fig.add_subplot(212, projection='3d')
-            ax.plot_surface(X, Y, Z, rstride=3, cstride=3, alpha=0.4)
-
-            if self.testfunction:
-                ax.plot_wireframe(X, Y, ZT, rstride=3, cstride=3)
-        if name:
-            plt.savefig(name)
-        else:
-            plt.savefig('pyKrigingResult.png')
+            return spx, spy, X, Y, Z, Ze
+        #     fig = plt.figure(figsize=(8, 6))
+        #     # contour_levels = np.linspace(min(zt), max(zt),50)
+        #     contour_levels = 15
+        #     plt.plot(spx, spy, 'ow')
+        #     cs = plt.colorbar()
+        #
+        #     if self.testfunction:
+        #         pass
+        #     plt.plot(spx, spy, 'ow')
+        #
+        #     cs = plt.colorbar()
+        #     plt.plot(spx, spy, 'ow')
+        #
+        #     ax = fig.add_subplot(212, projection='3d')
+        #     ax.plot_surface(X, Y, Z, rstride=3, cstride=3, alpha=0.4)
+        #
+        #     if self.testfunction:
+        #         ax.plot_wireframe(X, Y, ZT, rstride=3, cstride=3)
+        # if name:
+        #     plt.savefig(name)
+        # else:
+        #     plt.savefig('pyKrigingResult.png')
 
     def calcuatemeanMSE(self, p2s=200, points=None):
         '''
