@@ -1,5 +1,6 @@
 __author__ = 'cpaulson'
 
+from sys import exit
 import numpy as np
 from numpy.matlib import rand,zeros,ones,empty,eye
 from pyKriging import kriging
