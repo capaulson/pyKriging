@@ -6,7 +6,7 @@ class matrixops():
 
     def __init__(self):
         self.LnDetPsi = None
-        self.Psi = np.zeros((self.n,self.n), dtype=np.float)
+        self.Psi = np.zeros((self.n,self.n), dtype=float)
         self.psi = np.zeros((self.n,1))
         self.one = np.ones(self.n)
         self.mu = None
@@ -22,7 +22,7 @@ class matrixops():
                 self.distance[i,j]= np.abs((self.X[i]-self.X[j]))
 
     def updatePsi(self):
-        self.Psi = np.zeros((self.n,self.n), dtype=np.float)
+        self.Psi = np.zeros((self.n,self.n), dtype=float)
         self.one = np.ones(self.n)
         self.psi = np.zeros((self.n,1))
         newPsi = np.exp(-np.sum(self.theta*np.power(self.distance,self.pl), axis=2))
@@ -32,7 +32,7 @@ class matrixops():
         self.U = self.U.T
 
     def regupdatePsi(self):
-        self.Psi = np.zeros((self.n,self.n), dtype=np.float)
+        self.Psi = np.zeros((self.n,self.n), dtype=float)
         self.one = np.ones(self.n)
         self.psi = np.zeros((self.n,1))
         newPsi = np.exp(-np.sum(self.theta*np.power(self.distance,self.pl), axis=2))
