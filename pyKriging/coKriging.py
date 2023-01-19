@@ -111,9 +111,9 @@ class coKriging():
 
 
     def updatePsi(self):
-        self.PsicXc = np.zeros((self.nc,self.nc), dtype=np.float)
-        self.PsicXe = np.zeros((self.ne,self.ne), dtype=np.float)
-        self.PsicXcXe = np.zeros((self.nc,self.ne), dtype=np.float)
+        self.PsicXc = np.zeros((self.nc,self.nc), dtype=float)
+        self.PsicXe = np.zeros((self.ne,self.ne), dtype=float)
+        self.PsicXcXe = np.zeros((self.nc,self.ne), dtype=float)
         #
         # print self.thetac
         # print self.pc
