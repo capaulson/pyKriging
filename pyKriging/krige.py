@@ -208,7 +208,7 @@ class kriging(matrixops):
         y_min = np.min(self.y)
         if S <= 0.:
             EI = 0.
-        elif S > 0.:
+        else:
             EI_one = ((y_min - self.predict_normalized(x)) * (0.5 + 0.5*m.erf((
                       1./np.sqrt(2.))*((y_min - self.predict_normalized(x)) /
                                        S))))
@@ -223,7 +223,7 @@ class kriging(matrixops):
         y_min = np.min(self.y)
         if S <= 0.:
             EI = 0.
-        elif S > 0.:
+        else:
             EI_one = w*((y_min - self.predict_normalized(x)) * (0.5 +
                         0.5*m.erf((1./np.sqrt(2.))*((y_min -
                                   self.predict_normalized(x)) / S))))
