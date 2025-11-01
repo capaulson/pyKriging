@@ -53,3 +53,8 @@ docs/_build/
 
 # PyBuilder
 target/
+
+# Test results and outputs
+baseline_results.json
+*_results.json
+test_output/
