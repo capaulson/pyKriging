@@ -285,11 +285,12 @@ class GPUBackend:
                 """Element-wise square root."""
                 return torch.sqrt(x)
 
-            def sum(self, x, axis=None):
+            def sum(self, x, axis=None, keepdims=False):
                 """Sum of tensor elements."""
                 if axis is None:
                     return torch.sum(x)
-                return torch.sum(x, dim=axis)
+                # PyTorch uses 'keepdim' not 'keepdims'
+                return torch.sum(x, dim=axis, keepdim=keepdims)
 
             def dot(self, a, b):
                 """Dot product of two tensors."""

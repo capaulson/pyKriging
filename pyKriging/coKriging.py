@@ -26,14 +26,13 @@ from pyKriging import kriging
 # Import GPU backend for accelerated linear algebra
 from .gpu_backend import get_backend
 
-# Get the global backend instance
-_backend = get_backend(verbose=False)
-xp = _backend.xp  # NumPy-compatible array module (CuPy/PyTorch/NumPy)
-linalg = _backend.linalg  # Linear algebra operations
-
 
 class coKriging():
     def __init__(self, Xc, yc, Xe, ye):
+        # Get GPU backend dynamically (can be changed at runtime via configure_gpu)
+        self._backend = get_backend(verbose=False)
+        self.xp = self._backend.xp
+        self.linalg = self._backend.linalg
 
         # Create the data arrays
         self.Xc = np.atleast_2d(Xc).T
@@ -125,10 +124,10 @@ class coKriging():
         Creates distance matrix for nc cheap samples in k dimensions.
         GPU-accelerated for large datasets.
         """
-        self.distanceXc = xp.zeros((self.nc, self.nc, self.k))
+        self.distanceXc = self.xp.zeros((self.nc, self.nc, self.k))
         for i in range(self.nc):
             for j in range(i+1, self.nc):
-                self.distanceXc[i][j] = xp.abs((self.Xc[i] - self.Xc[j]))
+                self.distanceXc[i][j] = self.xp.abs((self.Xc[i] - self.Xc[j]))
 
     def distanceXe(self):
         """
@@ -137,10 +136,10 @@ class coKriging():
         Creates distance matrix for ne expensive samples in k dimensions.
         GPU-accelerated for faster computation.
         """
-        self.distanceXe = xp.zeros((self.ne, self.ne, self.k))
+        self.distanceXe = self.xp.zeros((self.ne, self.ne, self.k))
         for i in range(self.ne):
             for j in range(i+1, self.ne):
-                self.distanceXe[i][j] = xp.abs((self.Xe[i] - self.Xe[j]))
+                self.distanceXe[i][j] = self.xp.abs((self.Xe[i] - self.Xe[j]))
 
     def distanceXcXe(self):
         """
@@ -150,10 +149,10 @@ class coKriging():
         This captures the correlation structure between fidelity levels.
         GPU-accelerated for large multi-fidelity datasets.
         """
-        self.distanceXcXe = xp.zeros((self.nc, self.ne, self.k))
+        self.distanceXcXe = self.xp.zeros((self.nc, self.ne, self.k))
         for i in range(self.nc):
             for j in range(self.ne):
-                self.distanceXcXe[i][j] = xp.abs((self.Xc[i] - self.Xe[j]))
+                self.distanceXcXe[i][j] = self.xp.abs((self.Xc[i] - self.Xe[j]))
 
 
     def updatePsi(self):
@@ -173,28 +172,28 @@ class coKriging():
         - Cholesky decompositions (O(n³) operations)
         """
         # Initialize correlation matrices on GPU
-        self.PsicXc = xp.zeros((self.nc, self.nc), dtype=float)
-        self.PsicXe = xp.zeros((self.ne, self.ne), dtype=float)
-        self.PsicXcXe = xp.zeros((self.nc, self.ne), dtype=float)
+        self.PsicXc = self.xp.zeros((self.nc, self.nc), dtype=float)
+        self.PsicXe = self.xp.zeros((self.ne, self.ne), dtype=float)
+        self.PsicXcXe = self.xp.zeros((self.nc, self.ne), dtype=float)
 
         # Build cheap data correlation matrix
         # Gaussian kernel: exp(-sum(theta * distance^p))
-        newPsicXc = xp.exp(-xp.sum(
-            self.thetac * xp.power(self.distanceXc, self.pc), axis=2
+        newPsicXc = self.xp.exp(-self.xp.sum(
+            self.thetac * self.xp.power(self.distanceXc, self.pc), axis=2
         ))
         print(newPsicXc[0])
 
         # Extract upper triangular part
-        self.PsicXc = xp.triu(newPsicXc, 1)
+        self.PsicXc = self.xp.triu(newPsicXc, 1)
 
         # Make symmetric and add identity + nugget for numerical stability
-        # Note: Using xp.eye() instead of np.mat(eye()) for NumPy 2.0 compatibility
-        eye_nc = xp.eye(self.nc)
-        nugget_nc = xp.multiply(eye_nc, xp.spacing(1.0))
+        # Note: Using self.xp.eye() instead of np.mat(eye()) for NumPy 2.0 compatibility
+        eye_nc = self.xp.eye(self.nc)
+        nugget_nc = self.xp.multiply(eye_nc, self.xp.spacing(1.0))
         self.PsicXc = self.PsicXc + self.PsicXc.T + eye_nc + nugget_nc
 
         # Cholesky decomposition (GPU-accelerated O(n³) operation)
-        L_c = linalg.cholesky(self.PsicXc)
+        L_c = self.linalg.cholesky(self.PsicXc)
         self.UPsicXc = L_c.T  # Upper triangular factor
 
         print(self.PsicXc[0])
@@ -202,25 +201,25 @@ class coKriging():
         # Note: Removed exit() to allow full execution
 
         # Build expensive data correlation matrix
-        newPsicXe = xp.exp(-xp.sum(
-            self.thetac * xp.power(self.distanceXe, self.pc), axis=2
+        newPsicXe = self.xp.exp(-self.xp.sum(
+            self.thetac * self.xp.power(self.distanceXe, self.pc), axis=2
         ))
-        self.PsicXe = xp.triu(newPsicXe, 1)
+        self.PsicXe = self.xp.triu(newPsicXe, 1)
 
         # Make symmetric and add identity + nugget
-        eye_ne = xp.eye(self.ne)
-        nugget_ne = xp.multiply(eye_ne, xp.spacing(1.0))
+        eye_ne = self.xp.eye(self.ne)
+        nugget_ne = self.xp.multiply(eye_ne, self.xp.spacing(1.0))
         self.PsicXe = self.PsicXe + self.PsicXe.T + eye_ne + nugget_ne
 
         # Cholesky decomposition
-        L_e = linalg.cholesky(self.PsicXe)
+        L_e = self.linalg.cholesky(self.PsicXe)
         self.UPsicXe = L_e.T
 
         # Build cross-correlation matrix (cheap-expensive)
-        newPsiXeXc = xp.exp(-xp.sum(
-            self.thetad * xp.power(self.distanceXcXe, self.pd), axis=2
+        newPsiXeXc = self.xp.exp(-self.xp.sum(
+            self.thetad * self.xp.power(self.distanceXcXe, self.pd), axis=2
         ))
-        self.PsicXcXe = xp.triu(newPsiXeXc, 1)
+        self.PsicXcXe = self.xp.triu(newPsiXeXc, 1)
 
 
     def neglnlikehood(self):
@@ -234,14 +233,14 @@ class coKriging():
         All triangular solves and Cholesky decompositions are GPU-accelerated.
         """
         # Compute mean for cheap data: muc = (1^T * Psi_c^-1 * yc) / (1^T * Psi_c^-1 * 1)
-        # Note: Using xp.array() instead of np.matrix() for NumPy 2.0 compatibility
-        yc_col = xp.array(self.yc).reshape(-1, 1)  # Ensure column vector
-        a = linalg.solve(self.UPsicXc.T, yc_col)
-        b = linalg.solve(self.UPsicXc, a)
+        # Note: Using self.xp.array() instead of np.matrix() for NumPy 2.0 compatibility
+        yc_col = self.xp.array(self.yc).reshape(-1, 1)  # Ensure column vector
+        a = self.linalg.solve(self.UPsicXc.T, yc_col)
+        b = self.linalg.solve(self.UPsicXc, a)
         c = ones([self.nc, 1]).T @ b  # Matrix multiplication
 
-        d = linalg.solve(self.UPsicXc.T, ones([self.nc, 1]))
-        e = linalg.solve(self.UPsicXc, d)
+        d = self.linalg.solve(self.UPsicXc.T, ones([self.nc, 1]))
+        e = self.linalg.solve(self.UPsicXc, d)
         f = ones([self.nc, 1]).T @ e
 
         self.muc = c / f
@@ -249,17 +248,17 @@ class coKriging():
         # Compute mean for difference (expensive - rho*cheap)
         print('y', self.yd.T)
         yd_transposed = self.yd.T if self.yd.ndim > 1 else self.yd.reshape(-1, 1)
-        a = linalg.solve(self.UPsicXe.T, yd_transposed)
+        a = self.linalg.solve(self.UPsicXe.T, yd_transposed)
         print('a', a)
-        b = linalg.solve(self.UPsicXe, a)
+        b = self.linalg.solve(self.UPsicXe, a)
         print('b', b)
         c = ones([self.ne, 1]) * b
         print('c', c)
 
-        d = linalg.solve(self.UPsicXe.T, ones([self.ne, 1], dtype=float))
+        d = self.linalg.solve(self.UPsicXe.T, ones([self.ne, 1], dtype=float))
         print(d)
 
-        e = linalg.solve(self.UPsicXe, d)
+        e = self.linalg.solve(self.UPsicXe, d)
         print(e)
 
         f = ones([self.ne, 1]).T @ e
@@ -270,8 +269,8 @@ class coKriging():
         # Compute variance for cheap data
         residual_c = self.yc - ones([self.nc, 1]) * self.muc
         residual_c_col = residual_c.reshape(-1, 1) if residual_c.ndim == 1 else residual_c
-        a = linalg.solve(self.UPsicXc.T, residual_c_col) / self.nc
-        b = linalg.solve(self.UPsicXc, a)
+        a = self.linalg.solve(self.UPsicXc.T, residual_c_col) / self.nc
+        b = self.linalg.solve(self.UPsicXc, a)
         self.SigmaSqrc = residual_c_col.T @ b
 
         # Compute variance for difference
@@ -280,23 +279,23 @@ class coKriging():
         print(self.UPsicXe.T)
         residual_d = self.yd - ones([self.ne, 1]) * self.mud
         residual_d_col = residual_d.T if residual_d.ndim > 1 else residual_d.reshape(-1, 1)
-        a = linalg.solve(self.UPsicXe.T, residual_d_col) / self.ne
-        b = linalg.solve(self.UPsicXe, a)
+        a = self.linalg.solve(self.UPsicXe.T, residual_d_col) / self.ne
+        b = self.linalg.solve(self.UPsicXe, a)
         self.SigmaSqrd = residual_d_col.T @ b
 
         # Build joint covariance matrix
         # Note: This construction needs to be verified - original code had undefined PsicXeXc and PsidXe
         # Keeping structure but using available matrices
-        self.C = xp.array([
+        self.C = self.xp.array([
             self.SigmaSqrc * self.PsicXc,
             self.rho * self.SigmaSqrc * self.PsicXcXe,
             self.rho * self.SigmaSqrc * self.PsicXcXe.T,  # Using transpose of PsicXcXe
-            xp.power(self.rho, 2) * self.SigmaSqrc * self.PsicXe + self.SigmaSqrd * self.PsicXe
+            self.xp.power(self.rho, 2) * self.SigmaSqrc * self.PsicXe + self.SigmaSqrd * self.PsicXe
         ])
-        self.C = xp.reshape(self.C, [2, 2])
+        self.C = self.xp.reshape(self.C, [2, 2])
 
         # Final Cholesky decomposition of joint covariance
-        self.UC = linalg.cholesky(self.C)
+        self.UC = self.linalg.cholesky(self.C)
 
         # self.mu=(self.one.T *(self.UC\(self.UC.T\y)))/(one'*(ModelInfo.UC\(ModelInfo.UC'\one)));
 
