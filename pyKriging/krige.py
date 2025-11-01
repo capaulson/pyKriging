@@ -1,4 +1,24 @@
+"""
+Kriging (Gaussian Process Regression) Module with GPU Acceleration
 
+This module provides a complete implementation of Kriging metamodels including:
+- Automatic hyperparameter optimization via GA/PSO
+- Expected improvement for sequential design
+- Uncertainty quantification
+- 2D and 3D visualization
+
+GPU Support:
+    All linear algebra operations (Cholesky, triangular solves) are automatically
+    GPU-accelerated when CUDA or Metal backends are available. This provides
+    significant speedups during training (which may evaluate likelihood 10,000+ times).
+
+    Data is automatically transferred between GPU and CPU as needed:
+    - GPU: Training, prediction, likelihood evaluation
+    - CPU: Plotting, visualization, user-facing outputs
+
+Author: chrispaulson
+Modified for GPU support
+"""
 
 __author__ = 'chrispaulson'
 import numpy as np
@@ -17,32 +37,61 @@ from time import time
 from inspyred import ec
 import math as m
 
+# Import GPU backend for accelerated computation
+from .gpu_backend import get_backend, to_cpu, to_gpu
 
 
 class kriging(matrixops):
     def __init__(self, X, y, testfunction=None, name='', testPoints=None, **kwargs):
+        """
+        Initialize a Kriging (Gaussian Process) metamodel.
+
+        Args:
+            X: Training input points (n x k array), where n=samples, k=dimensions
+            y: Training output values (n-length array)
+            testfunction: Optional ground truth function for validation
+            name: Optional name for the model
+            testPoints: Number of test points for tracking convergence history
+
+        The data is automatically normalized to [0,1] for better numerical stability.
+        All training data is transferred to GPU for accelerated computation.
+        """
+        # Get GPU backend for data transfer
+        self.backend = get_backend(verbose=False)
+
+        # Store original data on CPU (for plotting, etc.)
         self.X = copy.deepcopy(X)
         self.y = copy.deepcopy(y)
         self.testfunction = testfunction
         self.name = name
         self.n = self.X.shape[0]
         self.k = self.X.shape[1]
+
+        # Initialize hyperparameters on CPU first (will be transferred after normalization)
         self.theta = np.ones(self.k)
         self.pl = np.ones(self.k) * 2.
         self.sigma = 0
         self.normRange = []
         self.ynormRange = []
+
+        # Normalize data (on CPU)
         self.normalizeData()
+
+        # Now transfer normalized X, y, theta, pl to GPU for computation
+        # matrixops will use these GPU arrays for all linear algebra operations
+        self.X = to_gpu(self.X)
+        self.y = to_gpu(self.y)
+        self.theta = to_gpu(self.theta)
+        self.pl = to_gpu(self.pl)
+
         self.sp = samplingplan.samplingplan(self.k)
-        #self.updateData()
-        #self.updateModel()
 
         self.thetamin = 1e-5
         self.thetamax = 100
         self.pmin = 1
         self.pmax = 2
 
-        # Setup functions for tracking history
+        # Setup functions for tracking history (all on CPU)
         self.history = {}
         self.history['points'] = []
         self.history['neglnlike'] = []
@@ -53,6 +102,7 @@ class kriging(matrixops):
         self.history['chisquared'] = [1000]
         self.history['lastPredictedPoints'] = []
         self.history['avgMSE'] = []
+
         if testPoints:
             self.history['pointData'] = []
             self.testPoints = self.sp.rlh(testPoints)
@@ -68,11 +118,10 @@ class kriging(matrixops):
                 testPrimitive['mse'] = []
                 testPrimitive['gradient'] = []
                 self.history['pointData'].append(testPrimitive)
-
         else:
             self.history['pointData'] = None
 
-
+        # Initialize matrixops (which will use GPU arrays for computation)
         matrixops.__init__(self)
 
     def normX(self, X):
@@ -138,14 +187,28 @@ class kriging(matrixops):
         :param newX: A new design vector point
         :param newy: The new observed value at the point of X
         :param norm: A boolean value. For adding real-world values, this should be True. If doing something in model units, this should be False
+
+        Note: The new point is automatically transferred to GPU for computation.
         '''
         if norm:
             newX = self.normX(newX)
             newy = self.normy(newy)
 
-        self.X = np.append(self.X, [newX], axis=0)
-        self.y = np.append(self.y, newy)
-        self.n = self.X.shape[0]
+        # Transfer X and y to CPU for append operation (numpy.append works on CPU)
+        X_cpu = to_cpu(self.X)
+        y_cpu = to_cpu(self.y)
+
+        # Append new point
+        X_cpu = np.append(X_cpu, [newX], axis=0)
+        y_cpu = np.append(y_cpu, newy)
+
+        # Transfer back to GPU
+        self.X = to_gpu(X_cpu)
+        self.y = to_gpu(y_cpu)
+
+        self.n = X_cpu.shape[0]  # Update count
+
+        # Update model with new data
         self.updateData()
         while True:
             try:
@@ -159,11 +222,22 @@ class kriging(matrixops):
         '''
         The function sets new hyperparameters
         :param values: the new theta and p values to set for the model
+
+        Note: Hyperparameters are stored on GPU for efficient computation.
         '''
+        # Transfer to CPU for indexing, update, then transfer back to GPU
+        theta_cpu = to_cpu(self.theta)
+        pl_cpu = to_cpu(self.pl)
+
         for i in range(self.k):
-            self.theta[i] = values[i]
+            theta_cpu[i] = values[i]
         for i in range(self.k):
-            self.pl[i] = values[i + self.k]
+            pl_cpu[i] = values[i + self.k]
+
+        # Transfer updated hyperparameters back to GPU
+        self.theta = to_gpu(theta_cpu)
+        self.pl = to_gpu(pl_cpu)
+
         self.updateModel()
 
     def updateModel(self):
@@ -514,9 +588,13 @@ class kriging(matrixops):
                 mlab.show()
 
         if self.k==2:
-
             fig = pylab.figure(figsize=(8,6))
-            samplePoints = list(zip(*self.X))
+
+            # Transfer X from GPU to CPU for plotting
+            # Matplotlib doesn't support GPU arrays
+            X_cpu = to_cpu(self.X)
+            samplePoints = list(zip(*X_cpu))
+
             # Create a set of data to plot
             plotgrid = 61
             x = np.linspace(self.normRange[0][0], self.normRange[0][1], num=plotgrid)
@@ -527,6 +605,7 @@ class kriging(matrixops):
             X, Y = np.meshgrid(x, y)
 
             # Predict based on the optimized results
+            # Note: predict() returns Python floats, so no GPU transfer needed
 
             zs = np.array([self.predict([x,y]) for x,y in zip(np.ravel(X), np.ravel(Y))])
             Z = zs.reshape(X.shape)
@@ -536,8 +615,9 @@ class kriging(matrixops):
             zse = np.array([self.predict_var([x,y]) for x,y in zip(np.ravel(X), np.ravel(Y))])
             Ze = zse.reshape(X.shape)
 
-            spx = (self.X[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
-            spy = (self.X[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
+            # Use CPU version of X for plotting training points
+            spx = (X_cpu[:,0] * (self.normRange[0][1] - self.normRange[0][0])) + self.normRange[0][0]
+            spy = (X_cpu[:,1] * (self.normRange[1][1] - self.normRange[1][0])) + self.normRange[1][0]
             contour_levels = 25
 
             ax = fig.add_subplot(222)

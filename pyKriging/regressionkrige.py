@@ -1,4 +1,17 @@
+"""
+Regression Kriging Module with GPU Acceleration
 
+Regression Kriging adds explicit regularization to the standard Kriging model,
+making it more robust to noisy data and improving numerical stability.
+
+GPU Support:
+    All linear algebra operations are GPU-accelerated for faster training and prediction.
+    The regularized Cholesky decomposition (with Lambda parameter) benefits significantly
+    from GPU computation.
+
+Author: chrispaulson
+Modified for GPU support
+"""
 
 __author__ = 'chrispaulson'
 import numpy as np
@@ -16,22 +29,53 @@ from time import time
 from inspyred import ec
 import math as m
 
+# Import GPU backend for accelerated computation
+from .gpu_backend import get_backend, to_cpu, to_gpu
+
 
 class regression_kriging(matrixops):
     def __init__(self, X, y, testfunction=None, name='', testPoints=None, **kwargs):
+        """
+        Initialize a Regression Kriging metamodel with regularization.
+
+        Args:
+            X: Training input points (n x k array)
+            y: Training output values (n-length array)
+            testfunction: Optional ground truth function
+            name: Optional model name
+            testPoints: Number of test points for convergence tracking
+
+        The Lambda parameter controls regularization strength (set after initialization).
+        All data is automatically transferred to GPU for computation.
+        """
+        # Get GPU backend
+        self.backend = get_backend(verbose=False)
+
+        # Store data on CPU initially
         self.X = copy.deepcopy(X)
         self.y = copy.deepcopy(y)
         self.testfunction = testfunction
         self.name = name
         self.n = self.X.shape[0]
         self.k = self.X.shape[1]
+
+        # Initialize hyperparameters
         self.theta = np.ones(self.k)
         self.pl = np.ones(self.k) * 2.
-        self.Lambda = 0
+        self.Lambda = 0  # Regularization parameter
         self.sigma = 0
         self.normRange = []
         self.ynormRange = []
+
+        # Normalize data (on CPU)
         self.normalizeData()
+
+        # Transfer to GPU for computation
+        self.X = to_gpu(self.X)
+        self.y = to_gpu(self.y)
+        self.theta = to_gpu(self.theta)
+        self.pl = to_gpu(self.pl)
+
         self.sp = samplingplan(self.k)
         self.updateData()
         self.updateModel()
