@@ -464,6 +464,9 @@ class regression_kriging(matrixops):
             self.Lambda = newValues[-1]
             try:
                 self.updateModel()
+                # CRITICAL: Must call regneglikelihood() to compute mu, SigmaSqr, etc.
+                # Otherwise predict() will fail because self.mu is None
+                self.regneglikelihood()
             except:
                 pass
             else:

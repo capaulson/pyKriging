@@ -494,6 +494,9 @@ class kriging(matrixops):
                 self.pl[i] = newValues[i + self.k]
             try:
                 self.updateModel()
+                # CRITICAL: Must call neglikelihood() to compute mu, SigmaSqr, etc.
+                # Otherwise predict() will fail because self.mu is None
+                self.neglikelihood()
             except:
                 pass
             else:
