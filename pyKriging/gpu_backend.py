@@ -213,6 +213,8 @@ class GPUBackend:
             def __init__(self, torch_module, device):
                 self._torch = torch_module
                 self._device = device
+                # NumPy compatibility: np.newaxis is just None
+                self.newaxis = None
 
             def array(self, obj, dtype=None):
                 """
