@@ -215,11 +215,20 @@ class GPUBackend:
                 self._device = device
 
             def array(self, obj, dtype=None):
-                """Create a tensor from array-like object."""
+                """
+                Create a tensor from array-like object.
+
+                MPS doesn't support float64, so we convert to float32 automatically.
+                """
                 if isinstance(obj, torch.Tensor):
                     tensor = obj
                 else:
-                    tensor = torch.tensor(obj, dtype=self._map_dtype(dtype))
+                    # Convert to numpy first to check dtype
+                    obj_np = np.asarray(obj)
+                    if obj_np.dtype == np.float64 and dtype is None:
+                        # Auto-convert float64 to float32 for MPS
+                        obj_np = obj_np.astype(np.float32)
+                    tensor = torch.tensor(obj_np, dtype=self._map_dtype(dtype))
                 return tensor.to(self._device)
 
             def asarray(self, obj, dtype=None):
@@ -331,19 +340,24 @@ class GPUBackend:
                 return tensor
 
             def _map_dtype(self, dtype):
-                """Map NumPy dtypes to PyTorch dtypes."""
+                """
+                Map NumPy dtypes to PyTorch dtypes.
+
+                Note: MPS (Metal Performance Shaders) doesn't support float64,
+                so we default to float32 for Metal backend.
+                """
                 if dtype is None or dtype == float:
-                    return torch.float64
+                    return torch.float32  # MPS doesn't support float64
                 elif dtype == np.float32 or dtype == 'float32':
                     return torch.float32
                 elif dtype == np.float64 or dtype == 'float64':
-                    return torch.float64
+                    return torch.float32  # Convert float64 -> float32 for MPS
                 elif dtype == np.int32 or dtype == 'int32':
                     return torch.int32
                 elif dtype == np.int64 or dtype == 'int64':
                     return torch.int64
                 else:
-                    return torch.float64  # Default to float64
+                    return torch.float32  # Default to float32 for MPS compatibility
 
         # Create a linear algebra module for PyTorch
         class PyTorchLinalgWrapper:
@@ -402,6 +416,7 @@ class GPUBackend:
         elif self.backend_type == 'metal':
             print(f"Device: Apple Silicon (Metal Performance Shaders)")
             print(f"PyTorch Version: {self._torch.__version__}")
+            print(f"Note: MPS uses float32 (not float64) for all operations")
 
         elif self.backend_type == 'cpu':
             print(f"Device: CPU (NumPy)")
@@ -461,7 +476,11 @@ class GPUBackend:
 
         elif self.backend_type == 'metal':
             if not hasattr(arr, 'cpu'):  # Not already a PyTorch tensor
-                return self._torch.tensor(arr, device=self._torch_device)
+                # MPS doesn't support float64, convert to float32
+                arr_np = np.asarray(arr)
+                if arr_np.dtype == np.float64:
+                    arr_np = arr_np.astype(np.float32)
+                return self._torch.tensor(arr_np, device=self._torch_device)
             return arr
 
         else:  # CPU backend

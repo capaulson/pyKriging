@@ -19,6 +19,7 @@ The GPU acceleration feature provides **10-50x speedups** for training Kriging m
 2. **Metal (Apple Silicon)** via PyTorch MPS
    - Native support for M1/M2/M3 Macs
    - 50-70% of CUDA performance
+   - **Note:** Uses float32 (single precision) instead of float64 due to MPS limitations
 
 3. **CPU (Fallback)** via NumPy
    - Automatically used when no GPU is available
@@ -301,6 +302,38 @@ print(f"MPS built: {torch.backends.mps.is_built()}")
 Update PyTorch if needed:
 ```bash
 pip install --upgrade torch
+```
+
+### Metal Precision (float32 vs float64)
+
+**Important:** Apple's Metal Performance Shaders (MPS) does not support double precision (float64). The library automatically converts all float64 data to float32 when using Metal backend.
+
+**Impact on numerical accuracy:**
+- Float32 provides ~7 decimal digits of precision
+- Float64 provides ~16 decimal digits of precision
+- For most engineering applications, float32 is sufficient
+- Results may differ slightly from CPU (float64) computations
+
+**What the library does automatically:**
+```python
+# All float64 arrays are automatically converted to float32 on Metal
+X = np.array([1.0, 2.0, 3.0], dtype=np.float64)  # float64 on CPU
+k = kriging(X, y)  # Automatically converted to float32 on Metal backend
+```
+
+**If you need float64 precision:**
+```python
+# Force CPU backend for full float64 precision
+import pyKriging
+pyKriging.configure_gpu(device='cpu')
+```
+
+**Verification:**
+You can verify the backend and precision being used:
+```python
+info = pyKriging.get_device_info()
+print(f"Backend: {info['backend']}")
+# Output: Backend: metal (uses float32 automatically)
 ```
 
 ## Technical Details
