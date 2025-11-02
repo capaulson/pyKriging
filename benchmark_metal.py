@@ -21,6 +21,10 @@ from pyKriging.krige import kriging
 from pyKriging.samplingplan import samplingplan
 import time
 import sys
+import os
+
+# Enable MPS fallback for operations not yet implemented on Metal
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 
 def check_array_type(arr, name):
     """Helper function to identify array type and device location"""
@@ -78,7 +82,7 @@ if __name__ == '__main__':
 
     np.random.seed(42)
     sp = samplingplan(2)
-    X = sp.optimallhc(1000)  # 100 points in 2D
+    X = sp.optimallhc(100)  # 100 points in 2D
 
     y = np.array([testfun(x) for x in X])
     print(f"\n✓ Created dataset: {X.shape[0]} points in {X.shape[1]}D")
@@ -127,7 +131,6 @@ if __name__ == '__main__':
     print("    Window → GPU History")
     print("    You should see GPU usage spike to 50-80%")
     print()
-    input("Press ENTER when ready to start training...")
 
     print("\n4.1 Training model...")
     print("    This will call neglikelihood() thousands of times")

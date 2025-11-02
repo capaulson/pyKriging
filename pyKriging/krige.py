@@ -413,7 +413,12 @@ class kriging(matrixops):
         max_generations = args.setdefault('max_generations', 10)
         previous_best = args.setdefault('previous_best', None)
         max_evaluations = args.setdefault('max_evaluations', 30000)
-        current_best = np.around(max(population).fitness, decimals=4)
+
+        # Get fitness value and convert to CPU if it's a GPU tensor
+        fitness_val = max(population).fitness
+        if hasattr(fitness_val, 'cpu'):
+            fitness_val = fitness_val.cpu()
+        current_best = np.around(fitness_val, decimals=4)
         if previous_best is None or previous_best != current_best:
             args['previous_best'] = current_best
             args['generation_count'] = 0
@@ -520,6 +525,11 @@ class kriging(matrixops):
                 self.updateModel()
                 self.neglikelihood()
                 f = self.NegLnLike
+                # Convert GPU tensor to Python scalar for optimizer
+                if hasattr(f, 'cpu'):
+                    f = float(f.cpu())
+                elif hasattr(f, 'item'):
+                    f = float(f.item())
             except Exception as e:
                 # print 'Failure in NegLNLike, failing the run'
                 # print Exception, e
@@ -541,6 +551,11 @@ class kriging(matrixops):
             self.updateModel()
             self.neglikelihood()
             f = self.NegLnLike
+            # Convert GPU tensor to Python scalar for scipy optimizer
+            if hasattr(f, 'cpu'):
+                f = float(f.cpu())
+            elif hasattr(f, 'item'):
+                f = float(f.item())
         except Exception as e:
             # print 'Failure in NegLNLike, failing the run'
             # print Exception, e

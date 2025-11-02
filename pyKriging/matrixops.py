@@ -201,7 +201,8 @@ class matrixops():
         self.mu = (self.one.T.dot(e)) / c
 
         # Compute variance parameter: sigma^2 = (y - 1*mu)^T * Psi^-1 * (y - 1*mu) / n
-        residual = self.y - self.one.dot(self.mu)
+        # mu is scalar, so multiply element-wise with ones vector
+        residual = self.y - self.one * self.mu
         # Solve for Psi^-1 * residual using two triangular solves
         temp = self.linalg.solve(self.U.T, residual)
         psi_inv_residual = self.linalg.solve(self.U, temp)
@@ -274,7 +275,8 @@ class matrixops():
         self.psi = self.xp.exp(-summed)  # Shape: (n, 1)
 
         # Compute residual: z = y - 1*mu
-        z = self.y - self.one.dot(self.mu)
+        # mu is scalar, so multiply element-wise with ones vector
+        z = self.y - self.one * self.mu
 
         # Solve Psi^-1 * z using Cholesky factors (GPU-accelerated)
         # Forward solve: U.T * a = z
@@ -283,7 +285,8 @@ class matrixops():
         b = self.linalg.solve(self.U, a)
 
         # Compute prediction: f = mu + psi^T * Psi^-1 * (y - 1*mu)
-        c = self.psi.T.dot(b)
+        # Use matmul for compatibility with different shapes
+        c = self.xp.matmul(self.psi.T, b)
         f = self.mu + c
 
         # Extract scalar value (handle different array backends)
