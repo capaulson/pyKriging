@@ -4,8 +4,6 @@ import math as m
 import os
 import pickle
 import pyKriging
-from multiprocessing import Pool, cpu_count
-from functools import partial
 
 
 class samplingplan():
@@ -44,99 +42,64 @@ class samplingplan():
 
         return X
 
-    def optimallhc(self, n, population=30, iterations=30, generation=False, n_jobs='auto'):
+    def optimallhc(self,n,population=30, iterations=30, generation=False):
             """
             Generates an optimized Latin hypercube by optimizing the Morris-Mitchell
-            criterion for a range of exponents.
-
-            OPTIMIZED: Automatically uses parallel processing for large designs (n >= 50).
-            This provides ~5x speedup on multi-core systems.
+            criterion for a range of exponents and plots the first two dimensions of
+            the current hypercube throughout the optimization process.
 
             Inputs:
                 n - number of points required
-                population - number of individuals in the evolutionary operation optimizer
-                iterations - number of generations the evolutionary operation optimizer runs for
-                generation - if True, always generate new plan (ignore cache)
-                n_jobs - parallelization control:
-                    'auto' (default): automatically choose based on problem size
-                        - n < 50: serial (overhead not worth it)
-                        - n >= 50: parallel (5x speedup!)
-                    -1: use all CPU cores (force parallel)
-                    1: serial (force no parallelization)
-                    N: use N cores
+                Population - number of individuals in the evolutionary operation
+                             optimizer
+                Iterations - number of generations the evolutionary operation
+                             optimizer is run for
+                Note: high values for the two inputs above will ensure high quality
+                hypercubes, but the search will take longer.
+                generation - if set to True, the LHC will be generated. If 'False,' the algorithm will check for an existing plan before generating.
 
             Output:
                 X - optimized Latin hypercube
 
-            Performance:
-                - n < 50: Same as before
-                - n >= 50: ~5x faster with automatic multi-core utilization!
-            """
-            # List of q values to optimize for
-            q = [1, 2, 5, 10, 20, 50, 100]
 
-            # Distance norm (1=rectangular, 2=Euclidean)
+            """
+            ## TODO: This code isnt working in the Python3 branch.
+
+            # if not generation:
+
+                # Check for existing LHC sampling plans
+                # if os.path.isfile('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n)):
+                #     X = pickle.load(open('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n), 'rb'))
+                #     return X
+                # else:
+                #     print(self.path)
+                #     print('SP not found on disk, generating it now.')
+
+            #list of qs to optimise Phi_q for
+            q = [1,2,5,10,20,50,100]
+
+            #Set the distance norm to rectangular for a faster search. This can be
+            #changed to p=2 if the Euclidean norm is required.
             p = 1
 
-            # Start with random Latin hypercube
+            #we start with a random Latin hypercube
             XStart = self.rlh(n)
 
-            # Smart parallelization decision
-            if n_jobs == 'auto':
-                # Automatically choose based on problem size
-                # For n < 50, parallel overhead dominates (use serial)
-                # For n >= 50, parallel gives ~5x speedup
-                use_parallel = n >= 50 and cpu_count() > 1
-                n_workers = min(len(q), cpu_count()) if use_parallel else 1
-            elif n_jobs == -1:
-                # Force parallel with all cores
-                use_parallel = True
-                n_workers = min(len(q), cpu_count())
-            elif n_jobs == 1:
-                # Force serial
-                use_parallel = False
-                n_workers = 1
-            else:
-                # Use specific number of cores
-                use_parallel = n_jobs > 1
-                n_workers = min(n_jobs, len(q), cpu_count())
+            X3D = np.zeros((n,self.k,len(q)))
+            #for each q optimize Phi_q
+            for i in range(len(q)):
+                print(('Now_optimizing_for_q = %d \n' %q[i]))
+                X3D[:,:,i] = self.mmlhs(XStart, population, iterations, q[i])
 
-            # PARALLEL OPTIMIZATION (for large problems)
-            if use_parallel:
-                # Create worker function with fixed parameters
-                worker_func = partial(self._optimize_single_q,
-                                      XStart=XStart,
-                                      population=population,
-                                      iterations=iterations)
+            #sort according to the Morris-Mitchell criterion
+            Index = self.mmsort(X3D,p)
+            print(('Best_lh_found_using_q = %d \n' %q[Index[1]]))
 
-                # Parallel execution
-                with Pool(processes=n_workers) as pool:
-                    X_list = pool.map(worker_func, q)
+            #and the Latin hypercube with the best space-filling properties is
 
-                # Stack results into 3D array
-                X3D = np.stack(X_list, axis=2)
-            else:
-                # SERIAL OPTIMIZATION (for small problems or when forced)
-                X3D = np.zeros((n, self.k, len(q)))
-                for i in range(len(q)):
-                    print(f'Now_optimizing_for_q = {q[i]} \n')
-                    X3D[:, :, i] = self.mmlhs(XStart, population, iterations, q[i])
-
-            # Sort according to the Morris-Mitchell criterion
-            Index = self.mmsort(X3D, p)
-            print(f'Best_lh_found_using_q = {q[Index[1]]} \n')
-
-            # Return the Latin hypercube with the best space-filling properties
-            X = X3D[:, :, Index[1]]
+            X = X3D[:,:,Index[1]]
+            # pickle.dump(X, open('{0}lhc_{1}_{2}.pkl'.format(self.path,self.k, n), 'wb'))
             return X
-
-    def _optimize_single_q(self, q_value, XStart, population, iterations):
-        """
-        Worker function for parallel q-value optimization.
-        Called by multiprocessing.Pool.map() for each q value.
-        """
-        print(f'Now_optimizing_for_q = {q_value} \n')
-        return self.mmlhs(XStart, population, iterations, q_value)
 
 
     def fullfactorial(self, ppd=5):
@@ -271,44 +234,41 @@ class samplingplan():
         Phiq = (np.sum(J*(d**(-q))))**(1.0/q)
         return Phiq
 
-    def jd(self, X, p=1):
+    def jd(self, X,p=1):
         """
         Computes the distances between all pairs of points in a sampling plan
         X using the p-norm, sorts them in ascending order and removes multiple occurences.
 
-        OPTIMIZED: Uses vectorized NumPy operations instead of loops.
-        ~2-3x faster than original loop-based version.
-
         Inputs:
-            X - sampling plan being evaluated
-            p - distance norm (p=1 rectangular-default, p=2 Euclidean)
+            X-sampling plan being evaluated
+            p-distance norm (p=1 rectangular-default, p=2 Euclidean)
         Output:
-            J - multiplicity array (number of pairs separated by each distance value)
-            distinct_d - list of distinct distance values
+            J-multiplicity array (that is, the number of pairs separated by each distance value)
+            distinct_d-list of distinct distance values
+
         """
-        n = np.size(X, 0)
+        #number of points in the sampling plan
+        n = np.size(X[:,1])
 
-        # VECTORIZED distance calculation using broadcasting
-        # Shape: (n, 1, k) - (1, n, k) → (n, n, k)
-        X_i = X[:, np.newaxis, :]
-        X_j = X[np.newaxis, :, :]
-        diff = X_i - X_j
+        #computes the distances between all pairs of points
+        d = np.zeros((n*(n-1)//2))
 
-        # Compute p-norm distances
-        if p == 1:
-            # Manhattan distance (default, fastest)
-            distances = np.sum(np.abs(diff), axis=2)
-        elif p == 2:
-            # Euclidean distance
-            distances = np.sqrt(np.sum(diff ** 2, axis=2))
-        else:
-            # General p-norm
-            distances = np.sum(np.abs(diff) ** p, axis=2) ** (1.0 / p)
 
-        # Extract upper triangle (no diagonal) - only unique pairs
-        d = distances[np.triu_indices(n, k=1)]
 
-        # Remove multiple occurrences and count
+    #    for i in xrange(n-1):
+    #        for j in xrange(i+1,n):
+    #            if i == 0:
+    #                d[i+j-1] = np.linalg.norm((rld[0,:]-rld[j,:]),2)
+    #            else:
+    #                d[((i-1)*n - (i-1)*i/2 + j - i  )] = np.linalg.norm((X[i,:] - X[j,:]),2)
+
+        #an alternative way of the above loop
+        list = [(i,j) for i in range(n-1) for j in range(i+1,n)]
+        for k,l in enumerate(list):
+            d[k] = np.linalg.norm((X[l[0],:]-X[l[1],:]),p)
+
+
+        #remove multiple occurences
         distinct_d, J = np.unique(d, return_counts=True)
 
         return J, distinct_d
