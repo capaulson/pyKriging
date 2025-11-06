@@ -22,6 +22,8 @@ from pyKriging.samplingplan import samplingplan
 import time
 import sys
 import os
+import matplotlib.pyplot as plt
+from matplotlib import cm
 
 # Enable MPS fallback for operations not yet implemented on Metal
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
@@ -176,6 +178,89 @@ if __name__ == '__main__':
 
     print(f"✓ 1000 predictions in {prediction_time:.2f} seconds")
     print(f"  Average: {prediction_time/1000*1000:.2f} ms per prediction")
+
+    # ============================================================================
+    # PHASE 7: Visualize Trained Model
+    # ============================================================================
+    print("\n" + "=" * 80)
+    print("PHASE 7: Model Visualization")
+    print("=" * 80)
+
+    print("\n7.1 Creating prediction grid...")
+    # Create a dense grid for visualization
+    grid_resolution = 50
+    x1_grid = np.linspace(0, 1, grid_resolution)
+    x2_grid = np.linspace(0, 1, grid_resolution)
+    X1_mesh, X2_mesh = np.meshgrid(x1_grid, x2_grid)
+
+    # Generate predictions on the grid
+    grid_points = np.column_stack([X1_mesh.ravel(), X2_mesh.ravel()])
+    print(f"   Predicting on {len(grid_points)} grid points...")
+
+    grid_predictions = np.array([k.predict(pt) for pt in grid_points])
+    Z_pred = grid_predictions.reshape(X1_mesh.shape)
+
+    # Also compute true values for comparison
+    Z_true = np.array([testfun(pt) for pt in grid_points]).reshape(X1_mesh.shape)
+
+    print("   ✓ Predictions complete")
+
+    print("\n7.2 Generating plots...")
+    fig = plt.figure(figsize=(16, 5))
+
+    # Plot 1: True function
+    ax1 = fig.add_subplot(131, projection='3d')
+    surf1 = ax1.plot_surface(X1_mesh, X2_mesh, Z_true, cmap=cm.viridis,
+                              alpha=0.8, linewidth=0, antialiased=True)
+    ax1.scatter(X[:, 0], X[:, 1], y, c='red', marker='o', s=50, label='Training points')
+    ax1.set_xlabel('x1')
+    ax1.set_ylabel('x2')
+    ax1.set_zlabel('f(x)')
+    ax1.set_title('True Function', fontweight='bold')
+    ax1.legend()
+    fig.colorbar(surf1, ax=ax1, shrink=0.5)
+
+    # Plot 2: Kriging predictions
+    ax2 = fig.add_subplot(132, projection='3d')
+    surf2 = ax2.plot_surface(X1_mesh, X2_mesh, Z_pred, cmap=cm.viridis,
+                              alpha=0.8, linewidth=0, antialiased=True)
+    ax2.scatter(X[:, 0], X[:, 1], y, c='red', marker='o', s=50, label='Training points')
+    ax2.set_xlabel('x1')
+    ax2.set_ylabel('x2')
+    ax2.set_zlabel('f(x)')
+    ax2.set_title('Kriging Prediction (Metal GPU)', fontweight='bold')
+    ax2.legend()
+    fig.colorbar(surf2, ax=ax2, shrink=0.5)
+
+    # Plot 3: Error
+    ax3 = fig.add_subplot(133, projection='3d')
+    error = np.abs(Z_true - Z_pred)
+    surf3 = ax3.plot_surface(X1_mesh, X2_mesh, error, cmap=cm.hot,
+                              alpha=0.8, linewidth=0, antialiased=True)
+    ax3.set_xlabel('x1')
+    ax3.set_ylabel('x2')
+    ax3.set_zlabel('|Error|')
+    ax3.set_title('Absolute Error', fontweight='bold')
+    fig.colorbar(surf3, ax=ax3, shrink=0.5)
+
+    plt.tight_layout()
+
+    # Save plot
+    plot_filename = 'metal_benchmark_model.png'
+    plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+    print(f"   ✓ Plot saved to: {plot_filename}")
+
+    # Calculate error statistics
+    mae = np.mean(np.abs(Z_true - Z_pred))
+    rmse = np.sqrt(np.mean((Z_true - Z_pred)**2))
+    max_error = np.max(np.abs(Z_true - Z_pred))
+
+    print(f"\n7.3 Prediction accuracy:")
+    print(f"   Mean Absolute Error (MAE): {mae:.6f}")
+    print(f"   Root Mean Square Error (RMSE): {rmse:.6f}")
+    print(f"   Maximum Error: {max_error:.6f}")
+
+    plt.show()
 
     # ============================================================================
     # FINAL DIAGNOSIS
