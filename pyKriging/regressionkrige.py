@@ -34,7 +34,7 @@ from .gpu_backend import get_backend, to_cpu, to_gpu
 
 
 class regression_kriging(matrixops):
-    def __init__(self, X, y, testfunction=None, name='', testPoints=None, **kwargs):
+    def __init__(self, X, y, testfunction=None, name='', testPoints=None, device='auto', **kwargs):
         """
         Initialize a Regression Kriging metamodel with regularization.
 
@@ -44,13 +44,19 @@ class regression_kriging(matrixops):
             testfunction: Optional ground truth function
             name: Optional model name
             testPoints: Number of test points for convergence tracking
+            device: Device selection for computation:
+                'auto' (default): Smart selection based on problem size
+                    - n < 500: Use CPU (GPU overhead dominates)
+                    - n >= 500: Use GPU (computational benefit exceeds overhead)
+                'cpu': Force CPU computation
+                'gpu'/'cuda'/'metal': Force GPU computation
 
         The Lambda parameter controls regularization strength (set after initialization).
-        All data is automatically transferred to GPU for computation.
-        """
-        # Get GPU backend
-        self.backend = get_backend(verbose=False)
 
+        Performance:
+            - Small problems (n < 500): CPU is faster due to transfer overhead
+            - Large problems (n >= 500): GPU provides 2-3x speedup
+        """
         # Store data on CPU initially
         self.X = copy.deepcopy(X)
         self.y = copy.deepcopy(y)
@@ -58,6 +64,24 @@ class regression_kriging(matrixops):
         self.name = name
         self.n = self.X.shape[0]
         self.k = self.X.shape[1]
+
+        # Smart device selection based on problem size
+        if device == 'auto':
+            if self.n < 500:
+                selected_device = 'cpu'
+            else:
+                selected_device = 'auto'  # Let get_backend() choose best GPU
+        elif device in ['gpu', 'cuda', 'metal']:
+            selected_device = device if device != 'gpu' else 'auto'
+        else:
+            selected_device = device
+
+        # Configure backend
+        from .gpu_backend import configure_gpu
+        configure_gpu(device=selected_device, verbose=False)
+
+        # Get backend for this model
+        self.backend = get_backend(verbose=False)
 
         # Initialize hyperparameters
         self.theta = np.ones(self.k)
