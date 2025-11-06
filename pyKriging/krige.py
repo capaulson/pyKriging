@@ -42,7 +42,7 @@ from .gpu_backend import get_backend, to_cpu, to_gpu
 
 
 class kriging(matrixops):
-    def __init__(self, X, y, testfunction=None, name='', testPoints=None, device='auto', **kwargs):
+    def __init__(self, X, y, testfunction=None, name='', testPoints=None, **kwargs):
         """
         Initialize a Kriging (Gaussian Process) metamodel.
 
@@ -52,19 +52,13 @@ class kriging(matrixops):
             testfunction: Optional ground truth function for validation
             name: Optional name for the model
             testPoints: Number of test points for tracking convergence history
-            device: Device selection for computation:
-                'auto' (default): Smart selection based on problem size
-                    - n < 500: Use CPU (GPU overhead dominates)
-                    - n >= 500: Use GPU (computational benefit exceeds overhead)
-                'cpu': Force CPU computation
-                'gpu'/'cuda'/'metal': Force GPU computation
 
         The data is automatically normalized to [0,1] for better numerical stability.
-
-        Performance:
-            - Small problems (n < 500): CPU is faster due to transfer overhead
-            - Large problems (n >= 500): GPU provides 2-3x speedup
+        All training data is transferred to GPU for accelerated computation.
         """
+        # Get GPU backend for data transfer
+        self.backend = get_backend(verbose=False)
+
         # Store original data on CPU (for plotting, etc.)
         self.X = copy.deepcopy(X)
         self.y = copy.deepcopy(y)
@@ -72,26 +66,6 @@ class kriging(matrixops):
         self.name = name
         self.n = self.X.shape[0]
         self.k = self.X.shape[1]
-
-        # Smart device selection based on problem size
-        if device == 'auto':
-            # For small problems (n < 500), GPU overhead (transfer + sync) dominates
-            # For large problems (n >= 500), GPU computational benefit exceeds overhead
-            if self.n < 500:
-                selected_device = 'cpu'
-            else:
-                selected_device = 'auto'  # Let get_backend() choose best GPU
-        elif device in ['gpu', 'cuda', 'metal']:
-            selected_device = device if device != 'gpu' else 'auto'
-        else:
-            selected_device = device
-
-        # Configure backend
-        from .gpu_backend import configure_gpu
-        configure_gpu(device=selected_device, verbose=False)
-
-        # Get backend for this model
-        self.backend = get_backend(verbose=False)
 
         # Initialize hyperparameters on CPU first (will be transferred after normalization)
         self.theta = np.ones(self.k)
