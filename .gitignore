@@ -58,3 +58,29 @@ target/
 baseline_results.json
 *_results.json
 test_output/
+.pytest_cache/
+pytest.xml
+
+# Benchmark outputs
+*.png
+benchmarks/*.png
+
+# Cached sampling plans
+pyKriging/sampling_plans/*.npy
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+
+# macOS
+.DS_Store
+
+# Claude Code
+.claude/

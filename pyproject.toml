@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyKriging"
+version = "0.2.0"
+description = "A Kriging Toolbox for Python with GPU Acceleration"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Chris Paulson", email = "capaulson@gmail.com"}
+]
+keywords = ["kriging", "gaussian process", "metamodel", "surrogate", "gpu", "cuda", "metal", "optimization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy>=1.7.0",
+    "matplotlib>=3.5.0",
+    "inspyred>=1.0.0",
+    "dill>=0.3.0",
+]
+
+[project.optional-dependencies]
+gpu-nvidia = [
+    "cupy>=12.0.0",
+]
+gpu-metal = [
+    "torch>=2.0.0",
+]
+gpu-all = [
+    "cupy>=12.0.0",
+    "torch>=2.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/capaulson/pyKriging"
+Documentation = "https://github.com/capaulson/pyKriging#readme"
+Repository = "https://github.com/capaulson/pyKriging"
+Issues = "https://github.com/capaulson/pyKriging/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyKriging*"]
+
+[tool.setuptools.package-data]
+pyKriging = ["sampling_plans/*.npy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]  # Line length handled separately
+
+[tool.coverage.run]
+source = ["pyKriging"]
+omit = ["tests/*", "benchmarks/*"]
