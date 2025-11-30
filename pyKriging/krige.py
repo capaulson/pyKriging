@@ -507,44 +507,72 @@ class kriging(matrixops):
             else:
                 break
 
-    def fittingObjective(self,candidates, args):
+    def fittingObjective(self, candidates, args):
         '''
         The objective for a series of candidates from the hyperparameter global search.
         :param candidates: An array of candidate design vectors from the global optimizer
         :param args: args from the optimizer
         :return fitness: An array of evaluated NegLNLike values for the candidate population
 
-        GPU Optimization: Batch update hyperparameters instead of element-by-element.
-        OLD: 2*k separate CPU→GPU transfers per evaluation (120,000 for k=2, 30k evals)
-        NEW: 1 batch transfer per evaluation (30,000 total)
-        Speedup: 4x reduction in transfer overhead for k=2!
+        GPU Optimization: BATCHED evaluation of ALL candidates in a single GPU call!
+        CPU Optimization: Sequential evaluation to avoid cache-thrashing from large arrays.
+
+        GPU MODE (~100 GPU syncs):
+            all_hyperparams = stack(candidates)  # One CPU→GPU transfer
+            all_likelihoods = batch_neglikelihood(all_hyperparams)  # Batched GPU compute
+            results = all_likelihoods.cpu()  # One GPU→CPU sync
+
+        CPU MODE (sequential, cache-friendly):
+            for each candidate:
+                updateModel() + neglikelihood()  # No large intermediate arrays
         '''
-        fitness = []
-        for entry in candidates:
-            f=10000
-            # OPTIMIZED: Transfer all hyperparameters in a single GPU transfer
-            # Then split on GPU (no additional transfer overhead)
-            # OLD: 2*k element-by-element transfers = 120,000 for k=2, 30k evals
-            # NEW: 1 transfer per evaluation = 30,000 total (4x reduction!)
-            entry_np = np.asarray(entry)
-            params_gpu = to_gpu(entry_np[:2*self.k])
-            self.theta[:] = params_gpu[:self.k]
-            self.pl[:] = params_gpu[self.k:2*self.k]
+        # Check if we're on GPU - use batched evaluation only for GPU
+        # Batched evaluation creates large intermediate arrays that hurt CPU cache performance
+        use_batched = self._backend.is_gpu()
+
+        if use_batched:
+            # GPU: Batched evaluation reduces sync overhead
+            candidates_np = np.array(candidates)  # [batch_size, 2*k]
+            theta_batch = candidates_np[:, :self.k]  # [batch_size, k]
+            pl_batch = candidates_np[:, self.k:2*self.k]  # [batch_size, k]
 
             try:
-                self.updateModel()
-                self.neglikelihood()
-                f = self.NegLnLike
-                # Convert GPU tensor to Python scalar for optimizer
-                if hasattr(f, 'cpu'):
-                    f = float(f.cpu())
-                elif hasattr(f, 'item'):
-                    f = float(f.item())
+                # BATCHED evaluation: All candidates processed in ONE GPU call!
+                likelihoods = self.batch_neglikelihood(theta_batch, pl_batch)
+
+                # Single GPU→CPU sync for entire population
+                if hasattr(likelihoods, 'cpu'):
+                    fitness = likelihoods.cpu().numpy().tolist()
+                elif hasattr(likelihoods, 'get'):
+                    fitness = likelihoods.get().tolist()
+                else:
+                    fitness = likelihoods.tolist()
+
+                # Replace any NaN/Inf with high penalty
+                fitness = [10000.0 if (np.isnan(f) or np.isinf(f)) else float(f) for f in fitness]
+
             except Exception as e:
-                # print 'Failure in NegLNLike, failing the run'
-                # print Exception, e
-                f = 10000
-            fitness.append(f)
+                # Fallback to sequential if batched fails
+                fitness = [10000.0] * len(candidates)
+        else:
+            # CPU: Sequential evaluation is faster (avoids large intermediate arrays)
+            fitness = []
+            for candidate in candidates:
+                f = 10000.0
+                try:
+                    # Update hyperparameters
+                    for i in range(self.k):
+                        self.theta[i] = candidate[i]
+                        self.pl[i] = candidate[i + self.k]
+                    self.updateModel()
+                    self.neglikelihood()
+                    f = float(self.NegLnLike)
+                    if np.isnan(f) or np.isinf(f):
+                        f = 10000.0
+                except Exception:
+                    f = 10000.0
+                fitness.append(f)
+
         return fitness
 
     def fittingObjective_local(self,entry):

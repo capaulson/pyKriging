@@ -185,7 +185,9 @@ class matrixops():
         # But computed via Cholesky factors: Psi^-1 = U^-1 * U^-T
 
         # Forward solve: U.T * a = 1
-        a = self.linalg.solve(self.U.T, self.one.T)
+        # Note: Using .mT for matrix transpose (PyTorch 2.0+) instead of .T
+        U_T = self.U.mT if hasattr(self.U, 'mT') else self.U.T
+        a = self.linalg.solve(U_T, self.one.T)
         # Backward solve: U * b = a  =>  b = Psi^-1 * 1
         b = self.linalg.solve(self.U, a)
         # Denominator: 1^T * Psi^-1 * 1
@@ -394,3 +396,288 @@ class matrixops():
             return float(std_dev.get())
         else:
             return float(std_dev)
+
+    # =========================================================================
+    # BATCHED GPU OPERATIONS
+    # =========================================================================
+    # These methods evaluate multiple hyperparameter sets in parallel,
+    # dramatically reducing CPU-GPU synchronization overhead.
+    # Key insight: PyTorch's linalg.cholesky() supports batched input!
+    #
+    # Performance improvement:
+    # - Old: 30,000 CPU-GPU round trips during optimization
+    # - New: ~100 round trips (one per population)
+    # - Speedup: 100-300x reduction in sync overhead
+    # =========================================================================
+
+    def batch_compute_psi(self, theta_batch, pl_batch):
+        """
+        Compute correlation matrices for a batch of hyperparameter sets.
+
+        This is the core of the GPU optimization: instead of computing one
+        Psi matrix at a time (requiring CPU-GPU sync each time), we compute
+        all matrices for an entire optimizer population in one GPU call.
+
+        Args:
+            theta_batch: [batch_size, k] tensor of length scale parameters
+            pl_batch: [batch_size, k] tensor of power parameters
+
+        Returns:
+            Psi_batch: [batch_size, n, n] tensor of correlation matrices
+
+        GPU Memory: O(batch_size * n * n) - typically 300 * 100 * 100 * 4 bytes = 12MB
+        """
+        # Get batch size
+        batch_size = theta_batch.shape[0]
+
+        # self.distance has shape [n, n, k]
+        # theta_batch has shape [batch_size, k]
+        # We need to compute: exp(-sum_k(theta[b,k] * |distance[i,j,k]|^pl[b,k]))
+        # Result shape: [batch_size, n, n]
+
+        # Reshape for broadcasting:
+        # distance: [1, n, n, k] (add batch dimension)
+        # theta: [batch_size, 1, 1, k]
+        # pl: [batch_size, 1, 1, k]
+
+        if self._backend.backend_type == 'metal':
+            # PyTorch path
+            import torch
+
+            # Use no_grad for efficiency - we don't need gradients
+            with torch.no_grad():
+                # Ensure inputs are on the correct device
+                if not hasattr(theta_batch, 'device'):
+                    theta_batch = torch.tensor(theta_batch, dtype=torch.float32,
+                                              device=self._backend._torch_device)
+                if not hasattr(pl_batch, 'device'):
+                    pl_batch = torch.tensor(pl_batch, dtype=torch.float32,
+                                           device=self._backend._torch_device)
+
+                # Reshape distance for broadcasting: [1, n, n, k]
+                distance_expanded = self.distance.unsqueeze(0)
+
+                # Reshape hyperparameters: [batch_size, 1, 1, k]
+                theta_expanded = theta_batch.unsqueeze(1).unsqueeze(2)
+                pl_expanded = pl_batch.unsqueeze(1).unsqueeze(2)
+
+                # Compute: theta * |distance|^p, then sum over k, then exp(-)
+                # All operations are batched and parallelized on GPU
+                weighted = theta_expanded * torch.pow(distance_expanded, pl_expanded)
+                summed = torch.sum(weighted, dim=3)  # [batch_size, n, n]
+                Psi_batch = torch.exp(-summed)
+
+                # Add nugget for numerical stability (on diagonal only)
+                eye_batch = torch.eye(self.n, dtype=torch.float32,
+                                      device=self._backend._torch_device)
+                nugget = torch.finfo(torch.float32).eps
+                Psi_batch = Psi_batch + eye_batch.unsqueeze(0) * nugget
+
+        elif self._backend.backend_type == 'cuda':
+            # CuPy path
+            import cupy as cp
+
+            # Ensure inputs are on GPU
+            if not hasattr(theta_batch, 'device'):
+                theta_batch = cp.asarray(theta_batch)
+            if not hasattr(pl_batch, 'device'):
+                pl_batch = cp.asarray(pl_batch)
+
+            # Reshape for broadcasting
+            distance_expanded = self.distance[cp.newaxis, :, :, :]  # [1, n, n, k]
+            theta_expanded = theta_batch[:, cp.newaxis, cp.newaxis, :]  # [batch, 1, 1, k]
+            pl_expanded = pl_batch[:, cp.newaxis, cp.newaxis, :]
+
+            # Compute batched Psi
+            weighted = theta_expanded * cp.power(distance_expanded, pl_expanded)
+            summed = cp.sum(weighted, axis=3)
+            Psi_batch = cp.exp(-summed)
+
+            # Add nugget
+            eye_batch = cp.eye(self.n, dtype=cp.float32)
+            nugget = cp.finfo(cp.float32).eps
+            Psi_batch = Psi_batch + eye_batch[cp.newaxis, :, :] * nugget
+
+        else:
+            # CPU fallback (NumPy) - still benefits from vectorization
+            import numpy as np
+
+            theta_batch = np.asarray(theta_batch)
+            pl_batch = np.asarray(pl_batch)
+
+            # Convert distance to numpy if needed
+            distance_np = self._backend.to_cpu(self.distance)
+
+            distance_expanded = distance_np[np.newaxis, :, :, :]
+            theta_expanded = theta_batch[:, np.newaxis, np.newaxis, :]
+            pl_expanded = pl_batch[:, np.newaxis, np.newaxis, :]
+
+            weighted = theta_expanded * np.power(distance_expanded, pl_expanded)
+            summed = np.sum(weighted, axis=3)
+            Psi_batch = np.exp(-summed)
+
+            eye_batch = np.eye(self.n, dtype=np.float32)
+            nugget = np.finfo(np.float32).eps
+            Psi_batch = Psi_batch + eye_batch[np.newaxis, :, :] * nugget
+
+        return Psi_batch
+
+    def batch_neglikelihood(self, theta_batch, pl_batch):
+        """
+        Compute negative log-likelihood for a batch of hyperparameter sets.
+
+        This is the key performance optimization: evaluating an entire population
+        of hyperparameters in a single GPU call instead of 300 separate calls.
+
+        The optimization flow:
+        1. Compute all Psi matrices in parallel (batch_compute_psi)
+        2. Batched Cholesky decomposition (torch.linalg.cholesky handles batches!)
+        3. Batched triangular solves for mu and sigma
+        4. Return all likelihoods - only ONE GPU-CPU sync needed
+
+        Args:
+            theta_batch: [batch_size, k] length scale parameters
+            pl_batch: [batch_size, k] power parameters
+
+        Returns:
+            neg_log_likelihood: [batch_size] tensor of likelihood values
+                               Returns GPU tensor to avoid sync - caller decides when to sync
+
+        Performance:
+            Old: 300 candidates × 30,000 evals = 30,000 GPU-CPU syncs
+            New: 100 populations × 1 sync = 100 GPU-CPU syncs
+            Speedup: 300x reduction in sync overhead!
+        """
+        batch_size = theta_batch.shape[0] if hasattr(theta_batch, 'shape') else len(theta_batch)
+
+        # Step 1: Compute all Psi matrices [batch_size, n, n]
+        Psi_batch = self.batch_compute_psi(theta_batch, pl_batch)
+
+        if self._backend.backend_type == 'metal':
+            import torch
+
+            # Use no_grad context - we don't need gradients for hyperparameter optimization
+            # This reduces memory usage and speeds up computation
+            with torch.no_grad():
+                # Step 2: Batched Cholesky decomposition
+                # torch.linalg.cholesky supports batched input natively!
+                # This is where the GPU really shines - parallel Cholesky across all candidates
+                try:
+                    L_batch = torch.linalg.cholesky(Psi_batch)  # [batch, n, n] lower triangular
+                except RuntimeError as e:
+                    # If any matrix is not positive definite, return high penalty
+                    return torch.full((batch_size,), 10000.0,
+                                      device=self._backend._torch_device)
+
+                # Step 3: Compute log determinant for each matrix
+                # log|Psi| = 2 * sum(log(diag(L)))
+                diag_L = torch.diagonal(L_batch, dim1=1, dim2=2)  # [batch, n]
+                LnDetPsi = 2.0 * torch.sum(torch.log(torch.abs(diag_L)), dim=1)  # [batch]
+
+                # Step 4: Batched triangular solves for mu
+                # We need: mu = (1^T @ Psi^-1 @ y) / (1^T @ Psi^-1 @ 1)
+                # Using Cholesky: Psi^-1 = L^-T @ L^-1
+
+                # Prepare y and ones vectors for batched solve
+                # y shape: [n] -> [batch, n, 1] for batched solve
+                y_batch = self.y.unsqueeze(0).unsqueeze(2).expand(batch_size, -1, 1)
+                ones_batch = self.one.unsqueeze(0).unsqueeze(2).expand(batch_size, -1, 1)
+
+                # Solve L @ a = y  =>  a = L^-1 @ y
+                # Then L^T @ b = a  =>  b = Psi^-1 @ y
+                a_y = torch.linalg.solve_triangular(L_batch, y_batch, upper=False)
+                Psi_inv_y = torch.linalg.solve_triangular(L_batch.mT, a_y, upper=True)
+
+                # Same for ones vector
+                a_1 = torch.linalg.solve_triangular(L_batch, ones_batch, upper=False)
+                Psi_inv_1 = torch.linalg.solve_triangular(L_batch.mT, a_1, upper=True)
+
+                # mu = (1^T @ Psi^-1 @ y) / (1^T @ Psi^-1 @ 1)
+                # Shapes: [batch, 1, n] @ [batch, n, 1] = [batch, 1, 1]
+                ones_T = self.one.unsqueeze(0).unsqueeze(1)  # [1, 1, n] -> broadcasts to [batch, 1, n]
+                numerator = torch.bmm(ones_T.expand(batch_size, -1, -1), Psi_inv_y).squeeze(-1).squeeze(-1)
+                denominator = torch.bmm(ones_T.expand(batch_size, -1, -1), Psi_inv_1).squeeze(-1).squeeze(-1)
+                mu_batch = numerator / denominator  # [batch]
+
+                # Step 5: Compute SigmaSqr for each
+                # residual = y - 1*mu
+                # SigmaSqr = (residual^T @ Psi^-1 @ residual) / n
+                residual = self.y.unsqueeze(0) - self.one.unsqueeze(0) * mu_batch.unsqueeze(1)  # [batch, n]
+                residual_3d = residual.unsqueeze(2)  # [batch, n, 1]
+
+                # Solve for Psi^-1 @ residual
+                a_r = torch.linalg.solve_triangular(L_batch, residual_3d, upper=False)
+                Psi_inv_r = torch.linalg.solve_triangular(L_batch.mT, a_r, upper=True)
+
+                # SigmaSqr = (residual^T @ Psi^-1 @ residual) / n
+                SigmaSqr = torch.bmm(residual.unsqueeze(1), Psi_inv_r).squeeze(-1).squeeze(-1) / self.n
+
+                # Step 6: Compute negative log-likelihood
+                # NegLnLike = (n/2)*log(SigmaSqr) + (1/2)*LnDetPsi
+                NegLnLike = (self.n / 2.0) * torch.log(SigmaSqr) + 0.5 * LnDetPsi
+
+                return NegLnLike  # [batch] - stays on GPU!
+
+        elif self._backend.backend_type == 'cuda':
+            import cupy as cp
+
+            # CuPy batched Cholesky (via cuSOLVER)
+            try:
+                # CuPy doesn't have native batched Cholesky, so we loop
+                # But we still save on sync overhead by collecting all results
+                NegLnLike = cp.zeros(batch_size, dtype=cp.float32)
+
+                for i in range(batch_size):
+                    L = cp.linalg.cholesky(Psi_batch[i])
+                    LnDetPsi = 2.0 * cp.sum(cp.log(cp.abs(cp.diag(L))))
+
+                    # Triangular solves
+                    a = cp.linalg.solve(L, self.y)
+                    b = cp.linalg.solve(L.T, a)
+                    c = cp.linalg.solve(L, self.one)
+                    d = cp.linalg.solve(L.T, c)
+
+                    mu = self.one.dot(b) / self.one.dot(d)
+                    residual = self.y - self.one * mu
+                    e = cp.linalg.solve(L, residual)
+                    f = cp.linalg.solve(L.T, e)
+                    SigmaSqr = residual.dot(f) / self.n
+
+                    NegLnLike[i] = (self.n / 2.0) * cp.log(SigmaSqr) + 0.5 * LnDetPsi
+
+                return NegLnLike
+
+            except Exception:
+                return cp.full(batch_size, 10000.0, dtype=cp.float32)
+
+        else:
+            # CPU fallback
+            import numpy as np
+
+            NegLnLike = np.zeros(batch_size, dtype=np.float32)
+
+            # Convert to CPU ONCE outside the loop (not every iteration!)
+            y_cpu = self._backend.to_cpu(self.y)
+            one_cpu = self._backend.to_cpu(self.one)
+
+            for i in range(batch_size):
+                try:
+                    L = np.linalg.cholesky(Psi_batch[i])
+                    LnDetPsi = 2.0 * np.sum(np.log(np.abs(np.diag(L))))
+
+                    a = np.linalg.solve(L, y_cpu)
+                    b = np.linalg.solve(L.T, a)
+                    c = np.linalg.solve(L, one_cpu)
+                    d = np.linalg.solve(L.T, c)
+
+                    mu = one_cpu.dot(b) / one_cpu.dot(d)
+                    residual = y_cpu - one_cpu * mu
+                    e = np.linalg.solve(L, residual)
+                    f = np.linalg.solve(L.T, e)
+                    SigmaSqr = residual.dot(f) / self.n
+
+                    NegLnLike[i] = (self.n / 2.0) * np.log(SigmaSqr) + 0.5 * LnDetPsi
+                except Exception:
+                    NegLnLike[i] = 10000.0
+
+            return NegLnLike

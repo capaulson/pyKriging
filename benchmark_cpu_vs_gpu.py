@@ -72,9 +72,33 @@ if __name__ == '__main__':
         'speedups_prediction': []
     }
 
-    # Setup sampling plan
+    # ============================================================================
+    # PRE-GENERATE ALL SAMPLING PLANS (cached for faster testing)
+    # ============================================================================
+    print("\n" + "=" * 80)
+    print("PRE-GENERATING SAMPLING PLANS (cached)")
+    print("=" * 80)
+
     np.random.seed(42)
     sp = samplingplan(2)
+
+    print("\nGenerating all sampling plans upfront...")
+    start_cache = time.time()
+
+    # Cache training data for each sample size
+    cached_X_train = {}
+    cached_y_train = {}
+    for n in sample_sizes:
+        cached_X_train[n] = sp.optimallhc(n)
+        cached_y_train[n] = np.array([testfun(x) for x in cached_X_train[n]])
+        print(f"  ✓ Training set ({n} points): cached")
+
+    # Cache test points (same for all sizes)
+    cached_test_points = sp.rlh(n_test_points)
+    print(f"  ✓ Test set ({n_test_points} points): cached")
+
+    cache_time = time.time() - start_cache
+    print(f"\n✓ All sampling plans cached in {cache_time:.2f} seconds")
 
     print(f"\nTesting sample sizes: {sample_sizes}")
     print(f"Number of test points for prediction: {n_test_points}")
@@ -86,12 +110,12 @@ if __name__ == '__main__':
         print(f"BENCHMARK: {n_samples} training samples")
         print("=" * 80)
 
-        # Generate training data
-        X = sp.optimallhc(n_samples)
-        y = np.array([testfun(x) for x in X])
+        # Use cached training data
+        X = cached_X_train[n_samples]
+        y = cached_y_train[n_samples]
 
-        # Generate test points
-        test_points = sp.rlh(n_test_points)
+        # Use cached test points
+        test_points = cached_test_points
 
         # CPU Benchmark
         print(f"\n1. CPU Backend ({n_samples} samples)")

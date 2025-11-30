@@ -53,6 +53,30 @@ if __name__ == '__main__':
     print("=" * 80)
 
     # ============================================================================
+    # PRE-GENERATE ALL SAMPLING PLANS (cached for faster testing)
+    # ============================================================================
+    print("\n" + "=" * 80)
+    print("PRE-GENERATING SAMPLING PLANS (cached)")
+    print("=" * 80)
+
+    np.random.seed(42)
+    sp = samplingplan(2)
+
+    print("\nGenerating all sampling plans upfront...")
+    start_cache = time.time()
+
+    # Cache training data
+    cached_X_train = sp.optimallhc(1000)
+    print(f"  ✓ Training set: {cached_X_train.shape[0]} points")
+
+    # Cache test points for prediction benchmark
+    cached_X_test = sp.rlh(1000)
+    print(f"  ✓ Test set: {cached_X_test.shape[0]} points")
+
+    cache_time = time.time() - start_cache
+    print(f"\n✓ All sampling plans cached in {cache_time:.2f} seconds")
+
+    # ============================================================================
     # PHASE 1: Backend Configuration Check
     # ============================================================================
     print("\n" + "=" * 80)
@@ -76,18 +100,15 @@ if __name__ == '__main__':
         print("\n✓ Backend correctly set to Metal")
 
     # ============================================================================
-    # PHASE 2: Create 100-Point Dataset
+    # PHASE 2: Create Dataset (using cached sampling plan)
     # ============================================================================
     print("\n" + "=" * 80)
-    print("PHASE 2: Creating 100-Point Dataset")
+    print("PHASE 2: Creating Dataset (using cached sampling plan)")
     print("=" * 80)
 
-    np.random.seed(42)
-    sp = samplingplan(2)
-    X = sp.optimallhc(100)  # 100 points in 2D
-
+    X = cached_X_train
     y = np.array([testfun(x) for x in X])
-    print(f"\n✓ Created dataset: {X.shape[0]} points in {X.shape[1]}D")
+    print(f"\n✓ Using cached dataset: {X.shape[0]} points in {X.shape[1]}D")
 
     # ============================================================================
     # PHASE 3: Create Kriging Model
@@ -169,8 +190,8 @@ if __name__ == '__main__':
     print("PHASE 6: Prediction Benchmark")
     print("=" * 80)
 
-    print("\n6.1 Making 1000 predictions...")
-    test_points = sp.rlh(1000)
+    print("\n6.1 Making 1000 predictions (using cached test points)...")
+    test_points = cached_X_test
 
     start_time = time.time()
     predictions = [k.predict(pt) for pt in test_points]
