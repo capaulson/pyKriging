@@ -278,7 +278,7 @@ class kriging(matrixops):
         :return EI: The expected improvement value at the point x in the model
         '''
         S = self.predicterr_normalized(x)
-        y_min = np.min(self.y)
+        y_min = np.min(to_cpu(self.y))
         if S <= 0.:
             EI = 0.
         else:
@@ -293,7 +293,7 @@ class kriging(matrixops):
     def weightedexpimp(self, x, w):
         """weighted expected improvement (Sobester et al. 2005)"""
         S = self.predicterr_normalized(x)
-        y_min = np.min(self.y)
+        y_min = np.min(to_cpu(self.y))
         if S <= 0.:
             EI = 0.
         else:
@@ -493,16 +493,17 @@ class kriging(matrixops):
             newValues = lopResults['x']
 
             # Finally, set our new theta and pl values and update the model again
-            for i in range(self.k):
-                self.theta[i] = newValues[i]
-            for i in range(self.k):
-                self.pl[i] = newValues[i + self.k]
+            # Use batch transfer to GPU instead of element-by-element assignment
+            newValues_np = np.asarray(newValues)
+            params_gpu = to_gpu(newValues_np[:2*self.k])
+            self.theta = params_gpu[:self.k]
+            self.pl = params_gpu[self.k:2*self.k]
             try:
                 self.updateModel()
                 # CRITICAL: Must call neglikelihood() to compute mu, SigmaSqr, etc.
                 # Otherwise predict() will fail because self.mu is None
                 self.neglikelihood()
-            except:
+            except Exception:
                 pass
             else:
                 break
@@ -560,10 +561,11 @@ class kriging(matrixops):
             for candidate in candidates:
                 f = 10000.0
                 try:
-                    # Update hyperparameters
-                    for i in range(self.k):
-                        self.theta[i] = candidate[i]
-                        self.pl[i] = candidate[i + self.k]
+                    # Update hyperparameters using batch transfer
+                    candidate_np = np.asarray(candidate)
+                    params_gpu = to_gpu(candidate_np[:2*self.k])
+                    self.theta = params_gpu[:self.k]
+                    self.pl = params_gpu[self.k:2*self.k]
                     self.updateModel()
                     self.neglikelihood()
                     f = float(self.NegLnLike)

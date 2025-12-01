@@ -155,7 +155,7 @@ class TestKrigingUncertainty:
         k = kriging(X, y)
         k.train(optimizer='ga')
 
-        err = k.predicterr([0.5, 0.5])
+        err = k.predict_var([0.5, 0.5])
         assert err >= 0
 
     def test_predicterr_low_at_training_points(self, seed, simple_2d_function):
@@ -169,7 +169,7 @@ class TestKrigingUncertainty:
 
         # Error at training points should be very low
         for i in range(min(5, len(X))):
-            err = k.predicterr(X[i])
+            err = k.predict_var(X[i])
             assert err < 0.1, f"Uncertainty {err} too high at training point"
 
 
@@ -203,7 +203,7 @@ class TestKrigingExpectedImprovement:
         k = kriging(X, y)
         k.train(optimizer='ga')
 
-        ei = k.infill_ei([0.5, 0.5])
+        ei = k.expimp([0.5, 0.5])
         assert isinstance(ei, (int, float, np.floating))
 
     def test_infill_ei_non_negative(self, seed, simple_2d_function):
@@ -218,7 +218,7 @@ class TestKrigingExpectedImprovement:
         # EI should be non-negative everywhere
         test_points = sp.rlh(20)
         for pt in test_points:
-            ei = k.infill_ei(pt)
+            ei = k.expimp(pt)
             assert ei >= -1e-10  # Allow small numerical errors
 
 

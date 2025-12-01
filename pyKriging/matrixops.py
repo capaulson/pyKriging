@@ -331,7 +331,8 @@ class matrixops():
         try:
             # Solve Psi^-1 * psi using Cholesky factors (GPU-accelerated)
             psi_inv_psi = self.linalg.solve(self.U, self.linalg.solve(self.U.T, self.psi))
-            SSqr = self.SigmaSqr * (1 - self.psi.T.dot(psi_inv_psi))
+            # Use @ for matrix multiplication (works with both NumPy and PyTorch)
+            SSqr = self.SigmaSqr * (1 - self.psi.T @ psi_inv_psi)
         except Exception as e:
             print(f"Error in variance calculation:")
             print(f"  U.shape: {self.U.shape}")
@@ -380,7 +381,8 @@ class matrixops():
         # Compute regularized variance: s² = sigma² * (1 + Lambda - psi^T * Psi^-1 * psi)
         try:
             psi_inv_psi = self.linalg.solve(self.U, self.linalg.solve(self.U.T, self.psi))
-            SSqr = self.SigmaSqr * (1 + self.Lambda - self.psi.T.dot(psi_inv_psi))
+            # Use @ for matrix multiplication (works with both NumPy and PyTorch)
+            SSqr = self.SigmaSqr * (1 + self.Lambda - self.psi.T @ psi_inv_psi)
         except Exception as e:
             print(f"Error in regression variance calculation: {e}")
             raise

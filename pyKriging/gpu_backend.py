@@ -371,12 +371,28 @@ class GPUBackend:
                 self._device = device
 
             def cholesky(self, a):
-                """Cholesky decomposition (lower triangular)."""
-                return torch.linalg.cholesky(a)
+                """Cholesky decomposition (lower triangular).
+
+                Falls back to CPU for MPS since linalg_cholesky isn't supported.
+                """
+                try:
+                    return torch.linalg.cholesky(a)
+                except NotImplementedError:
+                    # MPS doesn't support cholesky, fall back to CPU
+                    result_cpu = torch.linalg.cholesky(a.cpu())
+                    return result_cpu.to(self._device)
 
             def solve(self, a, b):
-                """Solve linear system ax = b."""
-                return torch.linalg.solve(a, b)
+                """Solve linear system ax = b.
+
+                Falls back to CPU for MPS if linalg_solve isn't supported.
+                """
+                try:
+                    return torch.linalg.solve(a, b)
+                except NotImplementedError:
+                    # MPS may not support solve, fall back to CPU
+                    result_cpu = torch.linalg.solve(a.cpu(), b.cpu())
+                    return result_cpu.to(self._device)
 
             def norm(self, x, ord=None):
                 """Compute vector or matrix norm."""
@@ -385,8 +401,16 @@ class GPUBackend:
                 return torch.linalg.norm(x, ord=ord)
 
             def inv(self, a):
-                """Compute matrix inverse."""
-                return torch.linalg.inv(a)
+                """Compute matrix inverse.
+
+                Falls back to CPU for MPS if linalg_inv isn't supported.
+                """
+                try:
+                    return torch.linalg.inv(a)
+                except NotImplementedError:
+                    # MPS may not support inv, fall back to CPU
+                    result_cpu = torch.linalg.inv(a.cpu())
+                    return result_cpu.to(self._device)
 
         self.xp = PyTorchArrayWrapper(torch, self._torch_device)
         self.linalg = PyTorchLinalgWrapper(torch, self._torch_device)
