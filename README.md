@@ -13,6 +13,11 @@ predict with error estimates, and choose where to sample next.
 pip install pyKriging
 ```
 
+With NumPy/SciPy built on OpenBLAS (Linux, Windows, macOS before 14), also install `threadpoolctl`
+(`pip install "pyKriging[threads]"`): pyKriging then keeps OpenBLAS's threads from competing with its own during
+prediction, which makes predictions 2-6x faster. NumPy and SciPy on macOS 14 and later use Accelerate and gain
+nothing from it.
+
 ## Quick Start
 
 ```python

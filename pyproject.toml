@@ -34,7 +34,8 @@ dependencies = [
 [project.optional-dependencies]
 gpu = ["torch>=2.0"]         # opt-in float64 CUDA likelihood for large problems: configure_gpu('cuda')
 gpu-nvidia = ["torch>=2.0"]  # alias of 'gpu' kept for earlier install instructions
-dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.1"]
+threads = ["threadpoolctl>=3.0"]  # faster predictions with OpenBLAS: one BLAS thread while predicting
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.1", "threadpoolctl>=3.0"]
 
 [project.urls]
 Homepage = "https://github.com/capaulson/pyKriging"

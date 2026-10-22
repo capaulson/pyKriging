@@ -10,6 +10,7 @@ the maximum-likelihood estimates of Forrester et al. (2007, eqs 2.3 and 3.4-3.6)
 and the predictor weights w = Psi^-1 (y - 1 mu) = U^-1 (b - mu a) are cached once per fit, so a
 prediction costs O(nk) and an error estimate a single triangular solve.
 """
+import contextlib
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -23,6 +24,25 @@ EPS = np.finfo(float).eps
 PENALTY = 10000.0  # objective value for hyper-parameters whose correlation matrix is not positive definite
 _THREADS = min(8, os.cpu_count() or 1)
 _pool = _pool_pid = None
+_blas = None  # threadpoolctl controller, False if threadpoolctl is not installed
+
+
+def _one_blas_thread(size):
+    """Context limiting BLAS to one thread for work of `size` elements large enough for the threaded kernels, if the
+    optional threadpoolctl is installed. Batch prediction interleaves small BLAS calls with the threaded correlation
+    kernel, and OpenBLAS's own spinning threads then compete with it (2-6x slower); Accelerate is unaffected.
+    Small batches skip the limit, which costs a few microseconds, and training keeps BLAS threads: they help large
+    Cholesky factorisations."""
+    global _blas
+    if size <= 2 ** 17 or _THREADS < 2:
+        return contextlib.nullcontext()
+    if _blas is None:
+        try:
+            from threadpoolctl import ThreadpoolController  # deferred: scans the loaded libraries
+            _blas = ThreadpoolController()
+        except ImportError:
+            _blas = False
+    return _blas.limit(limits=1, user_api='blas') if _blas else contextlib.nullcontext()
 
 
 def _executor():
@@ -226,12 +246,14 @@ class matrixops:
             raise RuntimeError('the model is not fitted yet: call train() or update(values) first')
         step = max(1, 2_000_000 // (self.n * self.k))
         f, s = np.empty(len(x)), np.empty(len(x))
-        for i in range(0, len(x), step):
-            psi = self._psi(x[i:i + step])
-            if mean:
-                f[i:i + step] = self.mu + psi @ self._weights
-            if error:
-                s[i:i + step] = np.sqrt(np.abs(self._improvement_variance(psi) if improvement else self._variance(psi)))
+        with _one_blas_thread(len(x) * self.n * self.k):
+            for i in range(0, len(x), step):
+                psi = self._psi(x[i:i + step])
+                if mean:
+                    f[i:i + step] = self.mu + psi @ self._weights
+                if error:
+                    s[i:i + step] = np.sqrt(np.abs(self._improvement_variance(psi) if improvement else
+                                                   self._variance(psi)))
         return f, s
 
     def predict_normalized(self, x):

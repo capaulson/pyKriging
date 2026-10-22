@@ -322,3 +322,18 @@ def test_the_default_backend_is_the_cpu_even_with_cuda(monkeypatch):
 def test_isolation_part2_starts_on_the_cpu_again():
     """Runs after part 1: the autouse fixture in conftest.py must have restored the CPU backend."""
     assert pyKriging.get_device_info()['backend'] == 'cpu' and not pyKriging.is_gpu_available()
+
+
+@pytest.mark.parametrize('installed', [True, False], ids=['threadpoolctl', 'without'])
+def test_predictions_do_not_depend_on_the_optional_blas_thread_limit(monkeypatch, installed):
+    from pyKriging import matrixops
+    if installed:
+        pytest.importorskip('threadpoolctl')
+    X, y = _data()
+    model = kriging(X, y)
+    model.update([1.0, 1.0, 2.0, 2.0])
+    pts = np.random.default_rng(3).random((20_000, 2)) * 10  # large enough to limit BLAS threads
+    expected = model.predict(pts), model.predict_var(pts)
+    monkeypatch.setattr(matrixops, '_blas', None if installed else False)  # None: look threadpoolctl up again
+    np.testing.assert_array_equal(model.predict(pts), expected[0])
+    np.testing.assert_array_equal(model.predict_var(pts), expected[1])
