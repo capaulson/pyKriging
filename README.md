@@ -1,6 +1,7 @@
 # pyKriging
 
-A Python Kriging toolkit with automatic GPU acceleration.
+A Python Kriging (Gaussian-process) toolkit for surrogate modelling: fit a model to a few expensive evaluations,
+predict with error estimates, and choose where to sample next.
 
 [![CI](https://github.com/capaulson/pyKriging/actions/workflows/ci.yml/badge.svg)](https://github.com/capaulson/pyKriging/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/pyKriging.svg)](https://pypi.org/project/pyKriging/)
@@ -12,33 +13,21 @@ A Python Kriging toolkit with automatic GPU acceleration.
 pip install pyKriging
 ```
 
-**With GPU support:**
-```bash
-pip install pyKriging[gpu-nvidia]  # NVIDIA/CUDA
-pip install pyKriging[gpu-metal]   # Apple Silicon
-```
-
 ## Quick Start
 
 ```python
 import numpy as np
-from pyKriging.krige import kriging
-from pyKriging.samplingplan import samplingplan
+from pyKriging import kriging, samplingplan, testfunctions
 
-# Generate sample points
-sp = samplingplan(k=2)
-X = sp.optimallhc(20)
+X = samplingplan(k=2).optimallhc(20)    # 20-point optimal Latin hypercube in [0, 1]^2
+y = testfunctions().branin(X)           # your expensive function: one value per row of X
 
-# Evaluate your function
-y = np.array([my_function(x) for x in X])
-
-# Train model
-model = kriging(X, y)
+model = kriging(X, y, seed=0)           # seed makes training and infill reproducible
 model.train()
 
-# Predict
-prediction = model.predict([0.5, 0.5])
-uncertainty = model.predicterr([0.5, 0.5])
+model.predict([0.5, 0.5])               # one point -> float
+model.predict(np.random.rand(1000, 2))  # many points -> array
+model.predicterr([0.5, 0.5])            # standard error of the prediction
 ```
 
 ## Core API
@@ -46,41 +35,97 @@ uncertainty = model.predicterr([0.5, 0.5])
 ### Kriging Model
 
 ```python
-model = kriging(X, y)
-model.train()                    # Train the model
-model.predict(x)                 # Predict at point x
-model.predicterr(x)              # Prediction uncertainty
-model.infill_ei(x)               # Expected improvement
-model.addPoint(x, y)             # Add training point
+model = kriging(X, y, seed=None)        # X: (n, k) samples, y: (n,) responses, in your own units
+model.train(optimizer='pso')            # maximum-likelihood theta and p ('pso' or 'ga')
+model.predict(x)                        # x: one point (k,) or points (m, k)
+model.predicterr(x)                     # standard error, in the units of y
+model.infill_ei(x)                      # expected improvement
+model.infill(2, method='ei')            # 2 new points to sample: method='error' or 'ei'
+model.addPoint(x_new, y_new)            # add an observation; call train() again to re-tune
+```
+
+### Regression Kriging
+
+For noisy data: the same API, with a regression constant `model.Lambda` tuned along with theta and p.
+
+```python
+from pyKriging import regression_kriging
+model = regression_kriging(X, y, seed=0)
+model.train()
+```
+
+### Co-Kriging
+
+Combines many cheap, approximate samples with a few expensive ones (Forrester, Sóbester & Keane, *Multi-fidelity
+optimization via surrogate modelling*, Proc. R. Soc. A 463:3251, 2007,
+[doi:10.1098/rspa.2007.1900](https://doi.org/10.1098/rspa.2007.1900)).
+`examples/coKriging.py` reproduces the paper's one-variable example.
+
+```python
+from pyKriging.coKriging import coKriging
+ck = coKriging(Xc, yc, Xe, ye, seed=0)  # cheap (Xc, yc) and expensive (Xe, ye) data
+ck.train()
+ck.predict(x)                           # prediction of the expensive function
+ck.predict_var(x)                       # its standard error, with y scaled to [0, 1]
+ck.rho                                  # estimated scaling between the cheap and expensive data
 ```
 
 ### Sampling Plans
 
 ```python
-sp = samplingplan(k=2)           # k = number of dimensions
-X = sp.optimallhc(n)             # Optimal Latin hypercube (n points)
-X = sp.rlh(n)                    # Random Latin hypercube
-X = sp.fullfactorial(ppd)        # Full factorial (ppd points per dim)
+sp = samplingplan(k=2)                  # k = number of dimensions; random_state=... for repeatable plans
+X = sp.optimallhc(n)                    # Morris-Mitchell optimal Latin hypercube (n points)
+X = sp.rlh(n)                           # random Latin hypercube
+X = sp.fullfactorial(ppd)               # full factorial (ppd points per dim)
+Xe, Xrest = sp.subset(X, ne)            # space-filling subset, e.g. the expensive points of a co-kriging plan
+```
+
+### Cross-Validation, Sensitivity and Saving
+
+```python
+from pyKriging import loadModel, saveModel
+from pyKriging.CrossValidation import Cross_Validation
+from pyKriging.GlobalSensitivity import SobolSensitivity
+
+Cross_Validation(model).calculate_SCVR()    # leave-one-out predictions and standardised residuals
+sobol = SobolSensitivity(X, y)              # fits its own kriging surrogate (or pass model=...)
+sobol.sensitivity_Sobol()                   # first-order Sobol' indices; total-order indices in sobol.ST
+saveModel(model, 'model.pkl')               # save with dill; loadModel('model.pkl') restores it
 ```
 
 ### GPU Configuration
 
-GPU acceleration is automatic when available. To check or configure:
+pyKriging computes on the CPU by default: all model state is float64 NumPy, and LAPACK is fastest at the sizes
+kriging is usually used for. GPU use is opt-in: with PyTorch and an NVIDIA GPU (`pip install "pyKriging[gpu]"`),
+`configure_gpu('cuda')` runs the likelihood search of models trained on 300 or more samples on CUDA, in float64.
 
 ```python
 import pyKriging
 
-pyKriging.get_device_info()              # Check current backend
-pyKriging.configure_gpu(device='auto')   # Auto-detect (default)
-pyKriging.configure_gpu(device='cuda')   # Force NVIDIA
-pyKriging.configure_gpu(device='metal')  # Force Apple Silicon
-pyKriging.configure_gpu(device='cpu')    # Force CPU
+pyKriging.configure_gpu('cuda')         # use CUDA (RuntimeError without PyTorch CUDA support)
+pyKriging.configure_gpu('auto')         # or: CUDA if PyTorch finds a device, else the CPU
+pyKriging.configure_gpu('cpu')          # back to the default
+pyKriging.get_device_info()             # current backend and device
 ```
+
+Apple Metal is not supported: it has no float64, and the float32 path was both slower than the CPU code and less
+accurate. `configure_gpu('metal')` warns and uses the CPU. CuPy is no longer used.
+
+## What's New in 0.2
+
+- A rewritten numerical core: training, prediction and optimal Latin hypercubes are much faster, and predictions
+  accept arrays of points (`benchmarks/bench.py` measures it on your machine).
+- New: `seed` for reproducible models, `predicterr` and `infill_ei` in the units of y, a complete co-kriging
+  model, `samplingplan.subset`, closed-form leave-one-out cross-validation and true Sobol' indices.
+- inspyred is no longer needed; `optimallhc` no longer caches plans on disk or starts worker processes.
+- GPU use is opt-in and CUDA-only (`configure_gpu('cuda')`): the `gpu-metal` and `gpu-all` extras are gone, and
+  `gpu-nvidia` remains as an alias of `gpu`.
 
 ## Requirements
 
 - Python 3.9+
-- NumPy, SciPy, Matplotlib
+- NumPy, SciPy, Matplotlib, dill
+- Optional: PyTorch with CUDA, for the GPU likelihood
 
 ## Citation
 

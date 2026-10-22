@@ -65,9 +65,6 @@ pytest.xml
 *.png
 benchmarks/*.png
 
-# Cached sampling plans
-pyKriging/sampling_plans/*.npy
-
 # IDE
 .vscode/
 .idea/

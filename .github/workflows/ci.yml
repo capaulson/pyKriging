@@ -5,75 +5,76 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  MPLBACKEND: Agg
+
+# Python 3.9 jobs run on ubuntu-24.04, not ubuntu-latest: setup-python has no Python 3.9 build for Ubuntu 26.04.
 jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12']
-
+        os: [ubuntu-24.04, macos-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pytest tests
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run unit tests
-        run: |
-          pytest tests/ -v --ignore=tests/test_e2e.py -x
-
-      - name: Run e2e tests
-        run: |
-          pytest tests/test_e2e.py -v -x
+  floors:
+    name: oldest dependencies (Python 3.9)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.9'
+      - run: pip install -e . pytest "numpy==1.20.*" "scipy==1.7.*" "matplotlib==3.5.*" "dill==0.3.0"
+      - run: pytest tests
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: '3.13'
+      - run: pip install -e . ruff
+      - run: ruff check pyKriging tests --select E,F,W --ignore E501
+      - run: python -W error::SyntaxWarning -c "import pyKriging, pyKriging.coKriging, pyKriging.CrossValidation, pyKriging.GlobalSensitivity"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff
-
-      - name: Check code style
-        run: |
-          ruff check pyKriging/ --select=E9,F63,F7,F82 --ignore=E501
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: pip install -e .
+      - run: |
+          for f in examples/*.py; do
+            echo "::group::$f"
+            python "$f" || exit 1
+            echo "::endgroup::"
+          done
 
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
-
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
-
-      - name: Build package
-        run: python -m build
-
-      - name: Check package
-        run: |
-          pip install twine
-          twine check dist/*
+          python-version: '3.13'
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*

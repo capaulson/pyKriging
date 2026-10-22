@@ -1,328 +1,219 @@
 """
-Co-Kriging Module with GPU Acceleration Support
+Two-level co-kriging (Forrester, Sobester & Keane 2007, section 3, after Kennedy & O'Hagan 2000).
 
-Co-Kriging is a multi-fidelity metamodeling approach that combines:
-- Cheap (low-fidelity) function evaluations: many samples, less accurate
-- Expensive (high-fidelity) function evaluations: few samples, accurate
+The expensive function is modelled as Z_e(x) = rho Z_c(x) + Z_d(x) (eq. 3.1): a Gaussian process of the
+cheap function scaled by rho plus a Gaussian process of the difference. Hyper-parameters are estimated in
+two steps: theta_c and p_c from the cheap data alone (eq. 3.6), then theta_d, p_d and rho from the
+differences d = y_e - rho y_c(X_e) (eqs. 3.7-3.10); for given theta_d, p_d the MLEs of rho and mu_d are the
+generalised least-squares fit of y_e on [1, y_c(X_e)], so only theta_d and p_d are searched. Predictions use
+the joint covariance matrix C (eqs. 3.2, 3.11, 3.12) and interpolate the expensive data. By default the means
+are Kennedy & O'Hagan's per-level means (mu_c for cheap data, rho mu_c + mu_d for expensive data); mean='paper'
+uses the single mu = 1^T C^-1 y / 1^T C^-1 1 of eq. (3.11). With per-level means and X_e a subset of X_c, the
+predictor and its error are exactly rho y_c(x) + y_d(x) and rho^2 s_c^2(x) + s_d^2(x) (Le Gratiet & Garnier 2014),
+which are computed level by level: as stable as ordinary kriging, with no joint matrix to factorise.
 
-The method leverages correlations between fidelity levels to improve predictions.
-
-GPU Support:
-    All matrix operations (Cholesky decomposition, triangular solves, distance
-    calculations) are GPU-accelerated when available, providing significant
-    speedups for multi-fidelity datasets.
-
-Author: cpaulson
-Modified for GPU support with NumPy 2.0 compatibility
+    ck = coKriging(Xc, yc, Xe, ye)   # cheap data (nc, k), expensive data (ne, k), ideally Xe a subset of Xc
+    ck.train()
+    ck.predict(x), ck.predict_var(x), ck.expimp(x)
 """
-
 __author__ = 'cpaulson'
-
-from sys import exit
 import numpy as np
-from numpy.matlib import rand, zeros, ones, empty, eye
-from pyKriging import kriging
+from scipy.linalg import LinAlgError, lapack
 
-# Import GPU backend for accelerated linear algebra
-from .gpu_backend import get_backend
+from .krige import _search, kriging
+from .matrixops import EPS, PENALTY, correlation, expected_improvement, matrixops
+
+
+class _Level(kriging):
+    """Ordinary kriging of one fidelity level, on data already in co-kriging units (no further scaling)."""
+
+    def normalizeData(self):
+        self._xlo, self._xspan, self._fixed = np.zeros(self.k), np.ones(self.k), np.zeros(self.k, dtype=bool)
+        self.normRange, self.ynormRange = [[0.0, 1.0]] * self.k, [0.0, 1.0]
 
 
 class coKriging():
-    def __init__(self, Xc, yc, Xe, ye):
-        # Get GPU backend dynamically (can be changed at runtime via configure_gpu)
-        self._backend = get_backend(verbose=False)
-        self.xp = self._backend.xp
-        self.linalg = self._backend.linalg
-
-        # Create the data arrays
-        self.Xc = np.atleast_2d(Xc).T
-        self.yc = yc
-        self.nc = self.Xc.shape[0]
-
-        self.Xe = np.atleast_2d(Xe).T
-
-        self.ye = ye
-        self.ne = self.Xe.shape[0]
-
-        # rho regression parameter
-        self.rho = 1.9961
-        self.reorder_data()
-        # self.traincheap()
-
-        self.k = self.Xc.shape[1]
-        # if self.Xe.shape[1] != self.Xc.shape[1]:
-        #     print 'Xc and Xe must have the same number of design variables. Fatal error -- Exiting...'
-        #     exit()
-
-        # Configure the hyperparameter arrays
-        self.thetad = np.ones(self.k)
-        self.thetac = None
-        # self.thetac = self.kc.theta
-
-        self.pd = np.ones(self.k) * 2.
-        # self.pc = self.kc.pl
-        self.pc = np.ones(self.k) * 2.
-
-        # Matrix Operations
-        self.one=ones([self.ne+self.nc,1])
-        self.y=[self.yc, self.ye]
-
-        print('here1')
-
-    def reorder_data(self):
-        xe = []
-        ye = []
-        xc = []
-        yc = []
-
-        Xd = []
-        yd = []
-
-        for enu,entry in enumerate(self.Xc):
-            if entry in self.Xe:
-                print('Found this value in XE!!')
-                for enu1,test in enumerate(self.Xe):
-                    # if entry[0] == test[0] and  entry[1] == test[1]:
-                    if entry == test:
-                        xe.append(test.tolist())
-                        ye.append(self.ye[enu1].tolist())
-                        xc.append(entry.tolist())
-                        yc.append(self.yc[enu].tolist())
-                        Xd.append(entry.tolist())
-                        yd.append(self.ye[enu1].tolist()  - self.rho * self.yc[enu].tolist())
-                        break
-
-            else:
-                xc.insert(0,entry.tolist())
-                yc.insert(0,self.yc[enu].tolist())
-
-        self.Xe = np.array(xe)
-        self.ye = np.array(ye)
-        self.Xc = np.array(xc)
-        self.yc = np.array(yc)
-        self.Xd = np.array(Xd)
-        self.yd = np.atleast_2d(np.array(yd))
-
-
-    def updateData(self):
-        self.nc = self.Xc.shape[0]
-        self.ne = self.Xe.shape[0]
-        self.distanceXc()
-        self.distanceXe()
-        self.distanceXcXe()
-
-    def traincheap(self):
-        self.kc = kriging(self.Xc, self.yc)
-        self.kc.train()
-        print()
-
-
-    def distanceXc(self):
+    def __init__(self, Xc, yc, Xe, ye, seed=None, mean='koh'):
         """
-        Compute pairwise distances between cheap (low-fidelity) data points.
-
-        Creates distance matrix for nc cheap samples in k dimensions.
-        GPU-accelerated for large datasets.
+        Xc, yc: cheap samples (nc, k) and responses; Xe, ye: expensive samples (ne, k) and responses.
+        1-D X arrays are one-variable problems. Both levels share one scaling of x and one of y, so rho
+        keeps the units of the data. seed: seed for the hyper-parameter searches (None = random).
+        mean: 'koh' (per-level means) or 'paper' (one mean, eq. 3.11).
         """
-        self.distanceXc = self.xp.zeros((self.nc, self.nc, self.k))
-        for i in range(self.nc):
-            for j in range(i+1, self.nc):
-                self.distanceXc[i][j] = self.xp.abs((self.Xc[i] - self.Xc[j]))
+        if mean not in ('koh', 'paper'):
+            raise ValueError("mean must be 'koh' or 'paper'")
+        self.mean = mean
+        Xc, Xe = np.array(Xc, dtype=float), np.array(Xe, dtype=float)
+        Xc, Xe = Xc.reshape(len(Xc), -1), Xe.reshape(len(Xe), -1)
+        yc, ye = np.array(yc, dtype=float).ravel(), np.array(ye, dtype=float).ravel()
+        if len(yc) != len(Xc) or len(ye) != len(Xe) or Xc.shape[1] != Xe.shape[1]:
+            raise ValueError(f'inconsistent shapes: Xc {Xc.shape}, yc {yc.shape}, Xe {Xe.shape}, ye {ye.shape}')
+        X, y = np.vstack([Xc, Xe]), np.concatenate([yc, ye])
+        if not (np.isfinite(X).all() and np.isfinite(y).all()):
+            raise ValueError('Xc, yc, Xe and ye must be finite (NaN or inf)')
+        self._xlo, hi = X.min(axis=0), X.max(axis=0)
+        self._xspan = np.where(hi > self._xlo, hi - self._xlo, 1.0)
+        self._ylo, self._yspan = y.min(), (np.ptp(y) or 1.0)
+        self.Xc, self.Xe, self.yc, self.ye = self.normX(Xc), self.normX(Xe), self.normy(yc), self.normy(ye)
+        (self.nc, self.k), self.ne = self.Xc.shape, len(self.ye)
+        self.rng = np.random.default_rng(seed)
+        # a smooth (e.g. linear) difference d drives the MLE towards theta_d -> 0 along a flat likelihood ridge
+        # where Psi_d becomes numerically singular; theta >= 1e-4 keeps C well conditioned without biasing rho
+        self.thetamin, self.thetamax, self.pmin, self.pmax = 1e-4, 100.0, 1.0, 2.0
+        self.rho = None
 
-    def distanceXe(self):
-        """
-        Compute pairwise distances between expensive (high-fidelity) data points.
+    def normX(self, X):
+        """Real-world point(s) -> model units."""
+        return (np.asarray(X, dtype=float) - self._xlo) / self._xspan
 
-        Creates distance matrix for ne expensive samples in k dimensions.
-        GPU-accelerated for faster computation.
-        """
-        self.distanceXe = self.xp.zeros((self.ne, self.ne, self.k))
-        for i in range(self.ne):
-            for j in range(i+1, self.ne):
-                self.distanceXe[i][j] = self.xp.abs((self.Xe[i] - self.Xe[j]))
+    def normy(self, y):
+        return (np.asarray(y, dtype=float) - self._ylo) / self._yspan
 
-    def distanceXcXe(self):
-        """
-        Compute cross-distances between cheap and expensive data points.
+    def inversenormy(self, y):
+        return y * self._yspan + self._ylo
 
-        Creates distance matrix between all cheap-expensive pairs.
-        This captures the correlation structure between fidelity levels.
-        GPU-accelerated for large multi-fidelity datasets.
-        """
-        self.distanceXcXe = self.xp.zeros((self.nc, self.ne, self.k))
-        for i in range(self.nc):
-            for j in range(self.ne):
-                self.distanceXcXe[i][j] = self.xp.abs((self.Xc[i] - self.Xe[j]))
+    def _level(self, X, y):
+        level = _Level(X, y, seed=self.rng)
+        level.thetamin, level.thetamax, level.pmin, level.pmax = self.thetamin, self.thetamax, self.pmin, self.pmax
+        return level
 
+    def train(self, optimizer='pso'):
+        """Maximum-likelihood estimates for the cheap model (eq. 3.6), then for theta_d, p_d and rho (eq. 3.10)."""
+        self.cheap = self._level(self.Xc, self.yc)
+        self.cheap.train(optimizer)
+        # y_c at X_e: observed where the points coincide, else the cheap model's prediction (paper, footnote 3)
+        gap = np.abs(self.Xe[:, None, :] - self.Xc[None, :, :]).max(axis=2)
+        match = gap.argmin(axis=1)
+        collocated = gap[np.arange(self.ne), match] < 1e-12
+        self._recursive = self.mean == 'koh' and bool(collocated.all())
+        self.yc_e = np.where(collocated, self.yc[match], self.cheap.predict_normalized(self.Xe))
+        # a (nearly) constant y_c(X_e) carries no information on rho: then rho = 0 and y_e is kriged on its own
+        self._use_rho = np.ptp(self.yc_e) > np.sqrt(EPS) * max(1.0, np.abs(self.yc_e).max())
+        self.diff = self._level(self.Xe, self.ye - self.yc_e)
+        lo, hi = self.diff._bounds()
+        self.update(_search(self._difference_nll, lo, hi, self.k, self.rng, optimizer, kriging._search_settings[optimizer])[0])
 
-    def updatePsi(self):
-        """
-        Build and decompose correlation matrices for co-kriging.
+    def _gls(self, U):
+        """With U the upper Cholesky factor of Psi_d: MLEs [mu_d, rho] (GLS of y_e on [1, y_c(X_e)]) and the
+        squared norm of the whitened residual U^-T (y_e - mu_d - rho y_c(X_e))."""
+        a = lapack.dtrtrs(U, np.column_stack([np.ones(self.ne), self.yc_e, self.ye]), lower=0, trans=1)[0]
+        F = a[:, :2] if self._use_rho else a[:, :1]
+        beta = np.linalg.lstsq(F, a[:, 2], rcond=None)[0]
+        res = a[:, 2] - F @ beta
+        return np.r_[beta, 0.0][:2], res @ res
 
-        Co-kriging requires three correlation matrices:
-        1. PsicXc: Correlations within cheap (low-fidelity) data
-        2. PsicXe: Correlations within expensive (high-fidelity) data
-        3. PsicXcXe: Cross-correlations between cheap and expensive data
+    def _difference_nll(self, candidates):
+        """Concentrated -ln L of the difference model (eq. 3.10) for candidates [theta_d, p_d], with mu_d,
+        rho and sigma_d^2 at their MLEs; PENALTY where Psi_d is not positive definite."""
+        k, d, out = self.k, self.diff, np.full(len(candidates), PENALTY)
+        work = np.empty((self.ne, self.ne))
+        step = max(1, 4_000_000 // max(1, d._d.size))  # bound the correlation block, as kriging does
+        for s in range(0, len(candidates), step):
+            for i, r in enumerate(d._pair_correlations(candidates[s:s + step, :k], candidates[s:s + step, k:2 * k]), s):
+                U = d._cholesky(r, EPS, work)
+                if U is not None:
+                    nll = 0.5 * self.ne * np.log(self._gls(U)[1] / self.ne) + np.sum(np.log(U.diagonal()))
+                    out[i] = nll if np.isfinite(nll) else PENALTY
+        return out
 
-        Each matrix is constructed using Gaussian kernels and decomposed via
-        Cholesky factorization for efficient linear solves.
+    def update(self, values):
+        """Set [theta_d (k), p_d (k)], estimate rho and refit the difference model and the joint covariance C (eq. 3.2).
 
-        GPU acceleration provides significant speedup for:
-        - Exponential kernel evaluations (element-wise operations)
-        - Cholesky decompositions (O(n³) operations)
-        """
-        # Initialize correlation matrices on GPU
-        self.PsicXc = self.xp.zeros((self.nc, self.nc), dtype=float)
-        self.PsicXe = self.xp.zeros((self.ne, self.ne), dtype=float)
-        self.PsicXcXe = self.xp.zeros((self.nc, self.ne), dtype=float)
+        C is factorised by block elimination on the cheap block A = sigma_c^2 Psi_c, whose Cholesky factor U_c
+        the cheap model already holds. The Schur complement S = rho^2 sigma_c^2 G + sigma_d^2 Psi_d involves the
+        cheap model's posterior correlation G at X_e, which is positive semi-definite (and ~0 where X_e lies in
+        X_c); it is projected onto that cone so rounding cannot make C indefinite."""
+        values = np.asarray(values, dtype=float)[:2 * self.k]
+        self.diff.update(values)  # fixes Psi_d and its factor; mu_d, rho and y_d follow from the GLS fit
+        (mud, rho), _ = self._gls(self.diff.U)
+        self.rho = float(rho)
+        self.diff.y = self.ye - self.rho * self.yc_e
+        self.diff.update(values)
+        c, d, rho = self.cheap, self.diff, self.rho
+        # y_e exactly affine in y_c leaves no difference process (sigma_d^2 = 0) and C singular: keep a trace of it
+        d.SigmaSqr = max(d.SigmaSqr, 1e-12 * rho ** 2 * c.SigmaSqr)
+        self.thetac, self.pc, self.muc, self.SigmaSqrc = c.theta, c.pl, c.mu, c.SigmaSqr
+        self.thetad, self.pd, self.mud, self.SigmaSqrd = d.theta, d.pl, d.mu, d.SigmaSqr
+        if self._recursive:
+            self.mu = rho * c.mu + d.mu  # mean of the expensive process
+            return
+        self._Pce = Pce = correlation(self.Xc, self.Xe, c.theta, c.pl)
+        Pee = correlation(self.Xe, self.Xe, c.theta, c.pl) + np.eye(self.ne) * EPS
+        self._V = lapack.dtrtrs(c.U, Pce, lower=0, trans=1)[0]  # U_c^-T Psi_c(X_c, X_e)
+        lam, Q = np.linalg.eigh(Pee - self._V.T @ self._V)
+        S = rho ** 2 * c.SigmaSqr * (Q * np.maximum(lam, 0.0)) @ Q.T + d.SigmaSqr * d.Psi
+        self._US, info = lapack.dpotrf(S, lower=0, clean=1)
+        if info:
+            raise LinAlgError('co-kriging covariance matrix is not positive definite')
+        # generalised least-squares means: E[y] = F beta with F = 1 (eq. 3.11: one mu) or, for Kennedy & O'Hagan's
+        # per-level means, rows [1, 0] for cheap data and [rho, 1] for expensive data (beta = [mu_c, mu_d])
+        y, nc, ne = np.concatenate([self.yc, self.ye]), self.nc, self.ne
+        F = np.ones((nc + ne, 1)) if self.mean == 'paper' else np.r_[np.c_[np.ones(nc), np.zeros(nc)], np.c_[np.full(ne, rho), np.ones(ne)]]
+        CiF, Ciy = np.split(self._solve(np.column_stack([F, y])), [F.shape[1]], axis=1)
+        beta = np.linalg.solve(F.T @ CiF, F.T @ Ciy[:, 0])
+        self._weights = self._solve((y - F @ beta)[:, None])[:, 0]  # C^-1 (y - F beta), without cancellation
+        self.mu = beta[0] if self.mean == 'paper' else rho * beta[0] + beta[1]  # mean of the expensive process
 
-        # Build cheap data correlation matrix
-        # Gaussian kernel: exp(-sum(theta * distance^p))
-        newPsicXc = self.xp.exp(-self.xp.sum(
-            self.thetac * self.xp.power(self.distanceXc, self.pc), axis=2
-        ))
-        print(newPsicXc[0])
+    @property
+    def C(self):
+        """The joint covariance matrix of eq. (3.2) (built on request; predictions use its block factorisation)."""
+        c, d, rho = self.cheap, self.diff, self.rho
+        Pce = correlation(self.Xc, self.Xe, c.theta, c.pl)
+        Pee = correlation(self.Xe, self.Xe, c.theta, c.pl) + np.eye(self.ne) * EPS
+        return np.block([[c.SigmaSqr * c.Psi, rho * c.SigmaSqr * Pce],
+                         [rho * c.SigmaSqr * Pce.T, rho ** 2 * c.SigmaSqr * Pee + d.SigmaSqr * d.Psi]])
 
-        # Extract upper triangular part
-        self.PsicXc = self.xp.triu(newPsicXc, 1)
+    def _solve(self, v):
+        """C^-1 v for v (nc + ne, m) by block elimination."""
+        c, rho, nc = self.cheap, self.rho, self.nc
+        t = lapack.dtrtrs(c.U, lapack.dtrtrs(c.U, v[:nc], lower=0, trans=1)[0], lower=0)[0] / c.SigmaSqr  # A^-1 v1
+        u = lapack.dpotrs(self._US, v[nc:] - rho * c.SigmaSqr * self._Pce.T @ t, lower=0)[0]
+        return np.vstack([t - rho * lapack.dtrtrs(c.U, self._V @ u, lower=0)[0], u])
 
-        # Make symmetric and add identity + nugget for numerical stability
-        # Note: Using self.xp.eye() instead of np.mat(eye()) for NumPy 2.0 compatibility
-        eye_nc = self.xp.eye(self.nc)
-        nugget_nc = self.xp.multiply(eye_nc, self.xp.spacing(1.0))
-        self.PsicXc = self.PsicXc + self.PsicXc.T + eye_nc + nugget_nc
+    def _predict(self, x):
+        """Predictor (eq. 3.11) and its standard error (eq. 3.12) in model units at points x (m, k):
+        s^2 = rho^2 sigma_c^2 (1 - |v|^2) + sigma_d^2 - |U_S^-T r|^2 with v = U_c^-T psi_c(X_c, x) and
+        r = rho^2 sigma_c^2 (psi_c(X_e, x) - V^T v) + sigma_d^2 psi_d(X_e, x)."""
+        c, d, rho = self.cheap, self.diff, self.rho
+        if self._recursive:
+            (fc, sc), (fd, sd) = c._predict(x), d._predict(x)
+            return rho * fc + fd, np.sqrt(rho ** 2 * sc ** 2 + sd ** 2)
+        step = max(1, 2_000_000 // ((self.nc + self.ne) * self.k))
+        f, s = np.empty(len(x)), np.empty(len(x))
+        for i in range(0, len(x), step):
+            xi = x[i:i + step]
+            psi_c, psi_ce, psi_de = (correlation(xi, self.Xc, c.theta, c.pl), correlation(xi, self.Xe, c.theta, c.pl),
+                                     correlation(xi, self.Xe, d.theta, d.pl))
+            f[i:i + step] = self.mu + np.hstack([rho * c.SigmaSqr * psi_c, rho ** 2 * c.SigmaSqr * psi_ce
+                                                  + d.SigmaSqr * psi_de]) @ self._weights
+            v = lapack.dtrtrs(c.U, psi_c.T, lower=0, trans=1)[0]
+            r = rho ** 2 * c.SigmaSqr * (psi_ce.T - self._V.T @ v) + d.SigmaSqr * psi_de.T
+            w = lapack.dtrtrs(self._US, r, lower=0, trans=1)[0]
+            s2 = rho ** 2 * c.SigmaSqr * (1 - np.einsum('ij,ij->j', v, v)) + d.SigmaSqr - np.einsum('ij,ij->j', w, w)
+            s[i:i + step] = np.sqrt(np.abs(s2))
+        return f, s
 
-        # Cholesky decomposition (GPU-accelerated O(n³) operation)
-        L_c = self.linalg.cholesky(self.PsicXc)
-        self.UPsicXc = L_c.T  # Upper triangular factor
+    def _fitted(self):
+        if self.rho is None:
+            raise RuntimeError('the model is not fitted yet: call train() first')
 
-        print(self.PsicXc[0])
-        print(self.UPsicXc)
-        # Note: Removed exit() to allow full execution
+    def predict(self, X):
+        """Co-kriging prediction of the expensive function at real-world point(s) X."""
+        self._fitted()
+        x, single = matrixops._as_points(self.normX(X), self.k)
+        f = self.inversenormy(self._predict(x)[0])
+        return float(f[0]) if single else f
 
-        # Build expensive data correlation matrix
-        newPsicXe = self.xp.exp(-self.xp.sum(
-            self.thetac * self.xp.power(self.distanceXe, self.pc), axis=2
-        ))
-        self.PsicXe = self.xp.triu(newPsicXe, 1)
+    def predict_var(self, X):
+        """Standard error of the prediction (model units of y) at real-world point(s) X."""
+        self._fitted()
+        x, single = matrixops._as_points(self.normX(X), self.k)
+        s = self._predict(x)[1]
+        return float(s[0]) if single else s
 
-        # Make symmetric and add identity + nugget
-        eye_ne = self.xp.eye(self.ne)
-        nugget_ne = self.xp.multiply(eye_ne, self.xp.spacing(1.0))
-        self.PsicXe = self.PsicXe + self.PsicXe.T + eye_ne + nugget_ne
-
-        # Cholesky decomposition
-        L_e = self.linalg.cholesky(self.PsicXe)
-        self.UPsicXe = L_e.T
-
-        # Build cross-correlation matrix (cheap-expensive)
-        newPsiXeXc = self.xp.exp(-self.xp.sum(
-            self.thetad * self.xp.power(self.distanceXcXe, self.pd), axis=2
-        ))
-        self.PsicXcXe = self.xp.triu(newPsiXeXc, 1)
-
-
-    def neglnlikehood(self):
-        """
-        Compute negative log-likelihood for co-kriging model.
-
-        Co-kriging likelihood involves computing means and variances for both
-        cheap and expensive data, then combining them into a joint covariance
-        matrix for final Cholesky decomposition.
-
-        All triangular solves and Cholesky decompositions are GPU-accelerated.
-        """
-        # Compute mean for cheap data: muc = (1^T * Psi_c^-1 * yc) / (1^T * Psi_c^-1 * 1)
-        # Note: Using self.xp.array() instead of np.matrix() for NumPy 2.0 compatibility
-        yc_col = self.xp.array(self.yc).reshape(-1, 1)  # Ensure column vector
-        a = self.linalg.solve(self.UPsicXc.T, yc_col)
-        b = self.linalg.solve(self.UPsicXc, a)
-        c = ones([self.nc, 1]).T @ b  # Matrix multiplication
-
-        d = self.linalg.solve(self.UPsicXc.T, ones([self.nc, 1]))
-        e = self.linalg.solve(self.UPsicXc, d)
-        f = ones([self.nc, 1]).T @ e
-
-        self.muc = c / f
-
-        # Compute mean for difference (expensive - rho*cheap)
-        print('y', self.yd.T)
-        yd_transposed = self.yd.T if self.yd.ndim > 1 else self.yd.reshape(-1, 1)
-        a = self.linalg.solve(self.UPsicXe.T, yd_transposed)
-        print('a', a)
-        b = self.linalg.solve(self.UPsicXe, a)
-        print('b', b)
-        c = ones([self.ne, 1]) * b
-        print('c', c)
-
-        d = self.linalg.solve(self.UPsicXe.T, ones([self.ne, 1], dtype=float))
-        print(d)
-
-        e = self.linalg.solve(self.UPsicXe, d)
-        print(e)
-
-        f = ones([self.ne, 1]).T @ e
-        print(f)
-
-        self.mud = c / f
-
-        # Compute variance for cheap data
-        residual_c = self.yc - ones([self.nc, 1]) * self.muc
-        residual_c_col = residual_c.reshape(-1, 1) if residual_c.ndim == 1 else residual_c
-        a = self.linalg.solve(self.UPsicXc.T, residual_c_col) / self.nc
-        b = self.linalg.solve(self.UPsicXc, a)
-        self.SigmaSqrc = residual_c_col.T @ b
-
-        # Compute variance for difference
-        print(self.ne)
-        print(self.mud)
-        print(self.UPsicXe.T)
-        residual_d = self.yd - ones([self.ne, 1]) * self.mud
-        residual_d_col = residual_d.T if residual_d.ndim > 1 else residual_d.reshape(-1, 1)
-        a = self.linalg.solve(self.UPsicXe.T, residual_d_col) / self.ne
-        b = self.linalg.solve(self.UPsicXe, a)
-        self.SigmaSqrd = residual_d_col.T @ b
-
-        # Build joint covariance matrix
-        # Note: This construction needs to be verified - original code had undefined PsicXeXc and PsidXe
-        # Keeping structure but using available matrices
-        self.C = self.xp.array([
-            self.SigmaSqrc * self.PsicXc,
-            self.rho * self.SigmaSqrc * self.PsicXcXe,
-            self.rho * self.SigmaSqrc * self.PsicXcXe.T,  # Using transpose of PsicXcXe
-            self.xp.power(self.rho, 2) * self.SigmaSqrc * self.PsicXe + self.SigmaSqrd * self.PsicXe
-        ])
-        self.C = self.xp.reshape(self.C, [2, 2])
-
-        # Final Cholesky decomposition of joint covariance
-        self.UC = self.linalg.cholesky(self.C)
-
-        # self.mu=(self.one.T *(self.UC\(self.UC.T\y)))/(one'*(ModelInfo.UC\(ModelInfo.UC'\one)));
-
-
-
-def fc(X):
-    return np.power(X[:,0], 2) + X[:,0] + np.power(X[:,1], 2) + X[:,1]
-def fe(X):
-    return np.power(X[:,0], 2) + np.power(X[:,1], 2)
-
-if __name__=='__main__':
-    from . import samplingplan
-    import random
-    sp = samplingplan.samplingplan(2)
-    X = sp.optimallhc(20)
-    Xe = np.array( random.sample(X, 6) )
-
-    yc = fc(X)
-    ye = fe(Xe)
-
-    ck = coKriging(X, yc, Xe, ye)
-    ck.updateData()
-    ck.updatePsi()
-    ck.neglnlikehood()
-
-
-
-
-
-
+    def expimp(self, x):
+        """Expected improvement over the best expensive observation at normalised point(s) x (section 5)."""
+        self._fitted()
+        x, single = matrixops._as_points(x, self.k)
+        ei = expected_improvement(*self._predict(x), np.min(self.ye))
+        return float(ei[0]) if single else ei

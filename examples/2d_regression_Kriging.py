@@ -1,54 +1,53 @@
-from __future__ import print_function
-__author__ = 'cpaulson'
-import sys
-sys.path.insert(0, '../')
-import pyKriging
-from pyKriging.regressionkrige import regression_kriging
-from pyKriging.samplingplan import samplingplan
+"""
+Noisy data: regression kriging filters the noise (its regression constant Lambda is tuned with the other
+hyper-parameters) where ordinary kriging interpolates it. Both models get the same infill points.
+"""
+import numpy as np
+
+from pyKriging import kriging, regression_kriging, samplingplan, testfunctions
 
 
-from pyKriging.krige import kriging
-# The Kriging model starts by defining a sampling plan, we use an optimal Latin Hypercube here
-sp = samplingplan(2)
-X = sp.optimallhc(30)
+def main():
+    np.random.seed(2)  # branin_noise draws its noise from np.random
 
-# Next, we define the problem we would like to solve
-testfun = pyKriging.testfunctions().branin_noise
+    # The Kriging model starts by defining a sampling plan, we use an optimal Latin Hypercube here
+    X = samplingplan(k=2, random_state=2).optimallhc(30)
 
-# We generate our observed values based on our sampling plan and the test function
-y = testfun(X)
-print(X, y)
+    # Next, we define the problem we would like to solve: noisy observations of the Branin function
+    noisy = testfunctions().branin_noise
+    testfun = testfunctions().branin
+    y = noisy(X)
 
-testfun = pyKriging.testfunctions().branin
+    print('Setting up the Kriging Models')
 
+    # Now that we have our initial data, we can create a regression kriging model and an ordinary one
+    k = regression_kriging(X, y, testfunction=testfun, name='regression', testPoints=250, seed=2)
+    k.train(optimizer='pso')
+    k1 = kriging(X, y, testfunction=testfun, name='interpolating', testPoints=250, seed=2)
+    k1.train(optimizer='pso')
+    print('Lambda = {:.3g}'.format(k.Lambda))
+    k.snapshot()
 
-print('Setting up the Kriging Model')
-
-# Now that we have our initial data, we can create an instance of a kriging model
-k = regression_kriging(X, y, testfunction=testfun, name='simple', testPoints=250)
-k.train(optimizer='pso')
-k1 = kriging(X, y, testfunction=testfun, name='simple', testPoints=250)
-k1.train(optimizer='pso')
-print(k.Lambda)
-k.snapshot()
-
-
-for i in range(1):
-    newpoints = k.infill(5)
-    for point in newpoints:
+    # Five infill points from the regression model, observed with noise and added to both models
+    for point in k.infill(5):
         print('Adding point {}'.format(point))
-        newValue = testfun(point)[0]
+        newValue = noisy(point)[0]
         k.addPoint(point, newValue)
         k1.addPoint(point, newValue)
     k.train()
     k1.train()
-    # k.snapshot()
-#
-# # #And plot the model
 
-print('Now plotting final results...')
-print(k.Lambda)
-k.plot(show=False)
-k1.plot()
+    Xt = np.random.rand(1000, 2)
+    for name, model in (('regression kriging', k), ('ordinary kriging', k1)):
+        rmse = np.sqrt(np.mean((model.predict(Xt) - testfun(Xt)) ** 2))
+        print('{}: RMSE against the noise-free function {:.2f}'.format(name, rmse))
+    print('Lambda = {:.3g}'.format(k.Lambda))
+
+    # And plot the models
+    print('Now plotting final results...')
+    k.plot(show=False)
+    k1.plot()
 
 
+if __name__ == '__main__':
+    main()

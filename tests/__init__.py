@@ -1,1 +1,0 @@
-# pyKriging test suite

@@ -1,685 +1,258 @@
 """
-Matrix Operations Module with GPU Acceleration Support
+Linear-algebra core shared by the Kriging models (float64 NumPy / LAPACK).
 
-This module provides the core matrix operations for Kriging models, including:
-- Distance calculations between training points
-- Correlation matrix construction and Cholesky decomposition
-- Likelihood evaluation via triangular solves
-- Prediction operations with uncertainty quantification
+With the Cholesky factorisation Psi = U^T U of the correlation matrix and a = U^-T 1, b = U^-T y,
+the maximum-likelihood estimates of Forrester et al. (2007, eqs 2.3 and 3.4-3.6) are
 
-GPU Support:
-    The module automatically uses GPU acceleration when available (CUDA or Metal).
-    All matrix operations are performed on the GPU for significant speedups,
-    especially for large datasets (n > 100 samples).
+    mu = a.b / a.a,    n sigma^2 = |b - mu a|^2,    ln|Psi| = 2 sum(ln diag U),
+    NegLnLike = n/2 ln(sigma^2) + 1/2 ln|Psi|,
 
-    Data is kept on the GPU between operations to minimize transfer overhead.
-    Only the final results are transferred back to CPU when needed.
+and the predictor weights w = Psi^-1 (y - 1 mu) = U^-1 (b - mu a) are cached once per fit, so a
+prediction costs O(nk) and an error estimate a single triangular solve.
 """
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from numpy.matlib import rand, zeros, ones, empty, eye
-import scipy
+from scipy.linalg import LinAlgError, lapack
+from scipy.special import erfcx, ndtr
 
-# Import GPU backend for accelerated linear algebra
-from .gpu_backend import get_backend
+from . import gpu_backend
+
+EPS = np.finfo(float).eps
+PENALTY = 10000.0  # objective value for hyper-parameters whose correlation matrix is not positive definite
+_THREADS = min(8, os.cpu_count() or 1)
+_pool = _pool_pid = None
 
 
-class matrixops():
+def _executor():
+    """Thread pool for the correlation kernels; recreated in a forked child, which inherits no worker threads."""
+    global _pool, _pool_pid
+    if _pool_pid != os.getpid():
+        _pool, _pool_pid = ThreadPoolExecutor(_THREADS), os.getpid()
+    return _pool
+
+
+def _correlations(theta, p, d, d2):
+    """exp(-sum_j theta_j |d_j|^p_j) for B hyper-parameter rows (B, k) and pair distances d (k, m) -> (B, m).
+    d2 = d**2 serves the common p = 2 exactly (pow(d, 2) == d*d bitwise)."""
+    acc = np.zeros((len(theta), d.shape[1]))
+    for j in range(len(d)):
+        at2 = p[:, j] == 2.0
+        term = np.empty_like(acc)
+        term[at2] = d2[j]
+        term[~at2] = np.power(d[j], p[~at2, j, None])
+        acc += theta[:, j, None] * term
+    return np.exp(-acc, out=acc)
+
+
+def correlation(A, B, theta, p):
+    """Correlation matrix exp(-sum_j theta_j |a_j - b_j|^p_j) between point sets A (m, k) and B (n, k) (eq. 2.2),
+    from contiguous (k, rows, n) blocks of about 1 MB, which large problems spread over threads. p = 2 is
+    computed as d*d: exact, and several times cheaper than pow."""
+    m, (n, k) = len(A), B.shape
+    At, Bt = np.ascontiguousarray(A.T, dtype=float), np.ascontiguousarray(B.T, dtype=float)
+    theta, p = np.asarray(theta, dtype=float)[:, None, None], np.asarray(p, dtype=float)[:, None, None]
+    square = bool(np.all(p == 2.0))
+    out, step = np.empty((m, n)), max(1, 2 ** 17 // (n * k))
+
+    def rows(a):
+        D = np.subtract(At[:, a:a + step, None], Bt[:, None, :])
+        np.abs(D, out=D)
+        if square:
+            np.multiply(D, D, out=D)
+        else:
+            np.power(D, p, out=D)
+        block = np.sum(np.multiply(D, theta, out=D), axis=0, out=out[a:a + step])
+        np.exp(np.negative(block, out=block), out=block)
+
+    list((_executor().map if m > step and _THREADS > 1 else map)(rows, range(0, m, step)))
+    return out
+
+
+def log_expected_improvement(f, s, y_min):
+    """ln EI without underflow or cancellation (Forrester et al. 2007, sec. 5 and appendix B, whose eq. (B2) lacks
+    a leading minus sign). EI = s h(u), u = (y_min - f)/s, h(u) = u Phi(u) + phi(u); for u < -1,
+    h(u) = phi(u) (1 - |u| sqrt(pi/2) erfcx(|u|/sqrt(2))), which tends to phi(u)/u^2. -inf where s = 0."""
+    f, s = np.broadcast_arrays(np.asarray(f, dtype=float), np.asarray(s, dtype=float))
+    out = np.full(f.shape, -np.inf)
+    ok = s > 0
+    u = (y_min - f[ok]) / s[ok]
+    log_h = np.empty_like(u)
+    mid, far = (u <= -1) & (u > -1e4), u <= -1e4  # far: asymptotic phi(u)/u^2, relative error < 3/u^2
+    near = ~(mid | far)
+    log_h[near] = np.log(u[near] * ndtr(u[near]) + np.exp(-0.5 * u[near] ** 2) / np.sqrt(2 * np.pi))
+    t = np.log(-u[mid] * erfcx(-u[mid] / np.sqrt(2))) + 0.5 * np.log(np.pi / 2)  # ln(1 - h/phi) < 0
+    log1mexp = np.where(t > -np.log(2), np.log(-np.expm1(t)), np.log1p(-np.exp(t)))
+    log_h[mid] = -0.5 * u[mid] ** 2 - 0.5 * np.log(2 * np.pi) + log1mexp
+    log_h[far] = -0.5 * u[far] ** 2 - 0.5 * np.log(2 * np.pi) - 2 * np.log(-u[far])
+    out[ok] = np.log(s[ok]) + log_h
+    return out
+
+
+def expected_improvement(f, s, y_min):
+    """Expected improvement (y_min - f) Phi(u) + s phi(u), u = (y_min - f)/s; 0 where s = 0 (section 5)."""
+    return np.exp(log_expected_improvement(f, s, y_min))
+
+
+class matrixops:
+    _jitter = 0.0  # extra diagonal used only while imputing points during multi-point infill
 
     def __init__(self):
-        """
-        Initialize matrix operations for Kriging.
-
-        This method initializes the core matrices used in Kriging:
-        - Psi: Correlation matrix between training points (n x n)
-        - psi: Correlation vector for predictions (n x 1)
-        - U: Upper triangular Cholesky factor of Psi
-        - one: Vector of ones for mean calculations
-
-        All matrices are created on the GPU if available.
-        """
-        # Get GPU backend dynamically (can be changed at runtime via configure_gpu)
-        self._backend = get_backend(verbose=False)
-        self.xp = self._backend.xp
-        self.linalg = self._backend.linalg
-
-        self.LnDetPsi = None  # Log determinant of correlation matrix
-
-        # Initialize matrices on GPU using xp (which could be cupy, torch, or numpy)
-        self.Psi = self.xp.zeros((self.n, self.n), dtype=float)  # Correlation matrix
-        self.psi = self.xp.zeros((self.n, 1))  # Correlation vector for predictions
-        self.one = self.xp.ones(self.n)  # Vector of ones
-
-        self.mu = None  # Mean of Gaussian process
-        self.U = None  # Cholesky factor (upper triangular)
-        self.SigmaSqr = None  # Variance parameter
-        self.Lambda = 1  # Regularization parameter
-
+        self.LnDetPsi = self.mu = self.U = self.SigmaSqr = self.NegLnLike = None
         self.updateData()
 
+    def _nugget(self):
+        """Diagonal added to Psi for numerical stability (regression kriging: the regression constant Lambda)."""
+        return EPS
+
+    def _err_offset(self):
+        """Constant added inside the error estimate s^2 = sigma^2 (offset + 1 - psi^T Psi^-1 psi)."""
+        return 0.0
+
     def updateData(self):
-        """
-        Compute pairwise distances between all training points.
+        """Pairwise |x_i - x_j| (i < j) of the normalised training data, per dimension (k, n(n-1)/2)."""
+        self.n, self.k = self.X.shape
+        iu = np.triu_indices(self.n, 1)
+        self._upper = iu[0] * self.n + iu[1]  # flat C-order indices of the strict upper triangle
+        self._lower = iu[1] * self.n + iu[0]  # and of its mirror image, the strict lower triangle
+        self._d = np.abs(self.X[iu[0]] - self.X[iu[1]]).T.copy()
+        self._d2 = self._d * self._d
 
-        This method calculates the distance matrix used for correlation calculations.
-        For n training points in k dimensions, creates an (n x n x k) array where
-        distance[i,j,d] is the absolute difference in dimension d between points i and j.
+    def _pair_correlations(self, theta, p):
+        """Correlations of all training pairs for B hyper-parameter rows; large problems split the pairs over threads
+        (the arithmetic is element-wise, so the values do not depend on the split)."""
+        theta, p = np.atleast_2d(theta), np.atleast_2d(p)
+        m = self._d.shape[1]
+        if theta.size * m < 200_000 or _THREADS < 2:
+            return _correlations(theta, p, self._d, self._d2)
+        out, cuts = np.empty((len(theta), m)), np.linspace(0, m, _THREADS + 1).astype(int)
 
-        GPU Optimization: Uses broadcasting to compute all distances at once instead of loops.
-        This provides 10-50x speedup on GPU by avoiding Python loop overhead and maximizing
-        parallel computation.
-        """
-        # Vectorized distance computation using broadcasting
-        # Expand dimensions: X_i shape (n, 1, k), X_j shape (1, n, k)
-        # Broadcasting results in shape (n, n, k) with all pairwise differences
-        X_expanded_i = self.X[:, self.xp.newaxis, :]  # Add dimension for broadcasting
-        X_expanded_j = self.X[self.xp.newaxis, :, :]  # Add dimension for broadcasting
+        def block(a, b):
+            out[:, a:b] = _correlations(theta, p, self._d[:, a:b], self._d2[:, a:b])
 
-        # Compute all pairwise differences at once (vectorized, GPU-efficient)
-        self.distance = self.xp.abs(X_expanded_i - X_expanded_j)
+        list(_executor().map(block, cuts[:-1], cuts[1:]))
+        return out
 
-        # Note: This computes full (n x n x k) matrix. Original code computed only
-        # upper triangle, but computing full matrix with GPU vectorization is
-        # faster than managing loop indices
+    def _batch_nll(self, theta, p, nugget, y=None):
+        """NegLnLike for B hyper-parameter sets (theta, p: (B, k); nugget: (B,)), PENALTY where Psi is not PD.
+        y: optional per-candidate responses (B, n) to use instead of self.y."""
+        accelerated = gpu_backend.batch_nll(self, theta, p, nugget, y)  # None unless CUDA is configured and n is large
+        if accelerated is not None:
+            return accelerated
+        n, out = self.n, np.full(len(theta), PENALTY)
+        rhs = np.asfortranarray(np.column_stack([np.ones(n), self.y]))
+        work = np.empty((n, n))
+        step = max(1, 4_000_000 // max(1, self._d.size))  # bound the (B, m) correlation block to ~32 MB
+        for s in range(0, len(theta), step):
+            for i, r in enumerate(self._pair_correlations(theta[s:s + step], p[s:s + step]), s):
+                U = self._cholesky(r, nugget[i], work)
+                if U is None:
+                    continue
+                if y is not None:
+                    rhs[:, 1] = y[i]
+                ab = lapack.dtrtrs(U, rhs, lower=0, trans=1)[0]
+                a, b = ab[:, 0], ab[:, 1]
+                res = b - (a @ b) / (a @ a) * a
+                nll = 0.5 * n * np.log(res @ res / n) + np.sum(np.log(U.diagonal()))
+                if np.isfinite(nll):
+                    out[i] = nll
+        return out
+
+    def _cholesky(self, r, nugget, work):
+        """Upper Cholesky factor U (Psi = U^T U) of Psi (pair correlations r, 1 + nugget on the diagonal) computed
+        in `work`, or None if Psi is not numerically positive definite. Psi is written to the lower triangle of the
+        C-ordered work array, i.e. the upper triangle of its Fortran-ordered transpose, so LAPACK factorises in
+        place. (The upper form also avoids a crash of dpotrf(lower=1) in the OpenBLAS of scipy 1.7 on arm64.)
+        Every fit uses this routine: near-singular matrices then pass or fail identically everywhere."""
+        flat = work.reshape(-1)
+        flat[self._lower] = r
+        flat[::self.n + 1] = 1.0 + nugget
+        U, info = lapack.dpotrf(work.T, lower=0, clean=0, overwrite_a=1)
+        return None if info else U
 
     def updatePsi(self):
-        """
-        Build and decompose the correlation matrix Psi.
-
-        This is one of the most computationally intensive operations in Kriging.
-        Steps:
-        1. Compute correlation matrix using Gaussian kernel with power-law distance
-        2. Add small diagonal term for numerical stability (nugget effect)
-        3. Perform Cholesky decomposition: Psi = U.T @ U
-
-        The Cholesky decomposition is O(n³/3) and heavily GPU-accelerated.
-        For n=500, expect ~40x speedup on CUDA vs CPU.
-
-        Correlation kernel: exp(-sum(theta * |distance|^p))
-        where theta and p are hyperparameters learned during training.
-        """
-        # Initialize matrices on GPU
-        self.Psi = self.xp.zeros((self.n, self.n), dtype=float)
-        self.one = self.xp.ones(self.n)
-        self.psi = self.xp.zeros((self.n, 1))
-
-        # Compute Gaussian correlation kernel: exp(-sum(theta * distance^p))
-        # This is computed element-wise and benefits greatly from GPU parallelization
-        newPsi = self.xp.exp(-self.xp.sum(self.theta * self.xp.power(self.distance, self.pl), axis=2))
-
-        # Extract upper triangular part
-        self.Psi = self.xp.triu(newPsi, 1)
-
-        # Make symmetric and add identity + nugget for numerical stability
-        # Note: Using xp.eye() instead of np.mat(eye()) for NumPy 2.0 compatibility
-        eye_matrix = self.xp.eye(self.n)
-        nugget = self.xp.multiply(eye_matrix, self.xp.spacing(1.0))  # Machine epsilon
-        self.Psi = self.Psi + self.Psi.T + eye_matrix + nugget
-
-        # Cholesky decomposition: Psi = L @ L.T (L is lower triangular)
-        # GPU acceleration is most impactful here (O(n³) operation)
-        L = self.linalg.cholesky(self.Psi)  # Returns lower triangular by default
-
-        # Store upper triangular factor: U = L.T
-        self.U = L.T
-
-    def regupdatePsi(self):
-        """
-        Build and decompose the regularized correlation matrix Psi.
-
-        Similar to updatePsi(), but adds explicit regularization term (Lambda)
-        to the diagonal for improved numerical stability. This is useful for
-        regression kriging or when data contains noise.
-
-        Regularization: Psi_reg = Psi + Lambda * I
-
-        The Lambda parameter controls the amount of regularization (typically 0.01 to 0.1).
-        """
-        # Initialize matrices on GPU
-        self.Psi = self.xp.zeros((self.n, self.n), dtype=float)
-        self.one = self.xp.ones(self.n)
-        self.psi = self.xp.zeros((self.n, 1))
-
-        # Compute Gaussian correlation kernel
-        newPsi = self.xp.exp(-self.xp.sum(self.theta * self.xp.power(self.distance, self.pl), axis=2))
-
-        # Extract upper triangular part
-        self.Psi = self.xp.triu(newPsi, 1)
-
-        # Make symmetric and add regularization
-        # Note: Using xp.eye() instead of eye() for GPU compatibility
-        eye_matrix = self.xp.eye(self.n)
-        self.Psi = self.Psi + self.Psi.T + eye_matrix + eye_matrix * self.Lambda
-
-        # Cholesky decomposition on GPU
-        L = self.linalg.cholesky(self.Psi)
-
-        # Store upper triangular factor
-        # Note: Removed np.matrix() for NumPy 2.0 compatibility - just use array
-        self.U = L.T
-
+        """Build the correlation matrix Psi and its upper Cholesky factor U (raises LinAlgError if not PD)."""
+        r = self._pair_correlations(self.theta, self.pl)[0]
+        nugget = self._nugget() + self._jitter
+        U = self._cholesky(r, nugget, np.empty((self.n, self.n)))
+        if U is None:
+            raise LinAlgError('correlation matrix is not positive definite')
+        U[np.tril_indices(self.n, -1)] = 0.0  # clean in place: U stays Fortran-ordered for LAPACK
+        self.U = U
+        self.Psi = np.eye(self.n) * (1.0 + nugget)
+        self.Psi.reshape(-1)[self._upper] = r
+        self.Psi = np.triu(self.Psi) + np.triu(self.Psi, 1).T
 
     def neglikelihood(self):
-        """
-        Compute the negative log-likelihood of the Gaussian process.
+        """MLEs mu and sigma^2, ln|Psi| and the concentrated NegLnLike; caches the predictor weights."""
+        ab = lapack.dtrtrs(self.U, np.column_stack([np.ones(self.n), self.y]), lower=0, trans=1)[0]
+        a, b = ab[:, 0], ab[:, 1]
+        self.mu = (a @ b) / (a @ a)
+        res = b - self.mu * a
+        self.SigmaSqr = (res @ res) / self.n
+        self.LnDetPsi = 2.0 * np.sum(np.log(np.abs(np.diag(self.U))))
+        with np.errstate(divide='ignore'):  # constant data: sigma^2 = 0
+            self.NegLnLike = 0.5 * self.n * np.log(self.SigmaSqr) + 0.5 * self.LnDetPsi
+        self._weights = lapack.dtrtrs(self.U, res, lower=0)[0]
 
-        This function is called thousands of times during hyperparameter optimization,
-        making it a critical hotspot for GPU acceleration. It performs:
-        1. Log-determinant calculation via Cholesky factor
-        2. Multiple triangular solves to compute GP mean (mu)
-        3. Variance calculation (SigmaSqr)
-        4. Likelihood evaluation
+    @staticmethod
+    def _as_points(x, k):
+        """(m, k) view of x and whether x was a single point (scalar results are returned for single points).
+        A point has shape (k,); m points have shape (m, k) (or (m,) when k = 1)."""
+        x = np.asarray(x, dtype=float)
+        if x.ndim > 2 or (x.ndim == 2 and x.shape[1] != k) or (x.ndim < 2 and k > 1 and x.size != k):
+            raise ValueError(f'expected a point of length {k} or an (m, {k}) array of points, got shape {x.shape}')
+        return x.reshape(-1, k), x.ndim <= 1 and x.size == k
 
-        All linear algebra operations are GPU-accelerated.
-        Expected speedup: 10-50x on CUDA for n > 100.
+    def _psi(self, x):
+        """Correlations between normalised points x (m, k) and the training points -> (m, n)."""
+        return correlation(x, self.X, self.theta, self.pl)
 
-        The negative log-likelihood is used as the objective function
-        during hyperparameter optimization.
-        """
-        # Compute log determinant from Cholesky factor: log|Psi| = 2*sum(log(diag(U)))
-        # This is numerically stable and GPU-accelerated
-        self.LnDetPsi = 2 * self.xp.sum(self.xp.log(self.xp.abs(self.xp.diag(self.U))))
+    def _variance(self, psi):
+        """sigma^2 (offset + 1 - psi^T Psi^-1 psi) for correlation rows psi (m, n)."""
+        v = lapack.dtrtrs(self.U, psi.T, lower=0, trans=1)[0]
+        return self.SigmaSqr * (1.0 + self._err_offset() - np.einsum('ij,ij->j', v, v))
 
-        # Solve for GP mean (mu) using triangular solves
-        # This is equivalent to: mu = (1^T * Psi^-1 * y) / (1^T * Psi^-1 * 1)
-        # But computed via Cholesky factors: Psi^-1 = U^-1 * U^-T
+    def _improvement_variance(self, psi):
+        """Variance used by expected improvement and error-based infill (regression kriging: re-interpolation)."""
+        return self._variance(psi)
 
-        # Forward solve: U.T * a = 1
-        # Note: Using .mT for matrix transpose (PyTorch 2.0+) instead of .T
-        U_T = self.U.mT if hasattr(self.U, 'mT') else self.U.T
-        a = self.linalg.solve(U_T, self.one.T)
-        # Backward solve: U * b = a  =>  b = Psi^-1 * 1
-        b = self.linalg.solve(self.U, a)
-        # Denominator: 1^T * Psi^-1 * 1
-        c = self.one.T.dot(b)
-
-        # Forward solve: U.T * d = y
-        d = self.linalg.solve(self.U.T, self.y)
-        # Backward solve: U * e = d  =>  e = Psi^-1 * y
-        e = self.linalg.solve(self.U, d)
-
-        # Numerator: 1^T * Psi^-1 * y
-        # GP mean estimate
-        self.mu = (self.one.T.dot(e)) / c
-
-        # Compute variance parameter: sigma^2 = (y - 1*mu)^T * Psi^-1 * (y - 1*mu) / n
-        # mu is scalar, so multiply element-wise with ones vector
-        residual = self.y - self.one * self.mu
-        # Solve for Psi^-1 * residual using two triangular solves
-        temp = self.linalg.solve(self.U.T, residual)
-        psi_inv_residual = self.linalg.solve(self.U, temp)
-
-        self.SigmaSqr = (residual.T.dot(psi_inv_residual)) / self.n
-
-        # Negative log-likelihood: -log p(y|theta) = (n/2)*log(sigma^2) + (1/2)*log|Psi|
-        self.NegLnLike = -1.0 * (-(self.n/2.0) * self.xp.log(self.SigmaSqr) - 0.5 * self.LnDetPsi)
-
-    def regneglikelihood(self):
-        """
-        Compute negative log-likelihood for regularized Kriging.
-
-        Similar to neglikelihood() but for use with regularized correlation matrix.
-        The regularization affects the likelihood calculation slightly.
-
-        GPU-accelerated triangular solves provide significant speedup.
-        """
-        # Compute log determinant from Cholesky factor
-        self.LnDetPsi = 2 * self.xp.sum(self.xp.log(self.xp.abs(self.xp.diag(self.U))))
-
-        # Compute mu using nested triangular solves
-        # mu = (1^T * Psi^-1 * y) / (1^T * Psi^-1 * 1)
-        numerator = self.one.T.dot(
-            self.linalg.solve(self.U, self.linalg.solve(self.U.T, self.y))
-        )
-        denominator = self.one.T.dot(
-            self.linalg.solve(self.U, self.linalg.solve(self.U.T, self.one))
-        )
-        self.mu = numerator / denominator
-
-        # Compute variance parameter
-        residual = self.y - self.one.dot(self.mu)
-        psi_inv_residual = self.linalg.solve(self.U, self.linalg.solve(self.U.T, residual))
-        self.SigmaSqr = (residual.T.dot(psi_inv_residual)) / self.n
-
-        # Negative log-likelihood
-        self.NegLnLike = -1.0 * (-(self.n/2.0) * self.xp.log(self.SigmaSqr) - 0.5 * self.LnDetPsi)
+    def _predict(self, x, mean=True, error=True, improvement=False):
+        """Predictor mean and/or standard error (normalised units; the infill error if improvement) at points x
+        (m, k), from one correlation block per chunk of points (chunked to bound memory)."""
+        if self.mu is None:
+            raise RuntimeError('the model is not fitted yet: call train() or update(values) first')
+        step = max(1, 2_000_000 // (self.n * self.k))
+        f, s = np.empty(len(x)), np.empty(len(x))
+        for i in range(0, len(x), step):
+            psi = self._psi(x[i:i + step])
+            if mean:
+                f[i:i + step] = self.mu + psi @ self._weights
+            if error:
+                s[i:i + step] = np.sqrt(np.abs(self._improvement_variance(psi) if improvement else self._variance(psi)))
+        return f, s
 
     def predict_normalized(self, x):
-        """
-        Make a prediction at a new point x (normalized coordinates).
-
-        This method computes the Kriging prediction using the GP posterior:
-        f(x) = mu + psi(x)^T * Psi^-1 * (y - 1*mu)
-
-        Where:
-        - psi(x) is the correlation vector between x and all training points
-        - Psi^-1 is computed via two triangular solves using Cholesky factors
-
-        Args:
-            x: Point at which to predict (in normalized coordinates)
-
-        Returns:
-            float: Predicted value at x
-
-        GPU acceleration provides speedup for:
-        - Correlation vector computation (element-wise operations)
-        - Triangular solves (O(n²) operations)
-        """
-        # Compute correlation vector between new point x and all training points
-        # psi[i] = exp(-sum(theta * |X[i] - x|^p))
-        #
-        # GPU Optimization: Vectorized computation instead of Python loop
-        # This computes all n correlations in one GPU kernel launch
-        x_gpu = self.xp.asarray(x)
-        diff = self.xp.abs(self.X - x_gpu)  # Shape: (n, k) - broadcast subtraction
-        weighted = self.theta * self.xp.power(diff, self.pl)  # Element-wise operations
-        summed = self.xp.sum(weighted, axis=1, keepdims=True)  # Sum over k dimensions
-        self.psi = self.xp.exp(-summed)  # Shape: (n, 1)
-
-        # Compute residual: z = y - 1*mu
-        # mu is scalar, so multiply element-wise with ones vector
-        z = self.y - self.one * self.mu
-
-        # Solve Psi^-1 * z using Cholesky factors (GPU-accelerated)
-        # Forward solve: U.T * a = z
-        a = self.linalg.solve(self.U.T, z)
-        # Backward solve: U * b = a  =>  b = Psi^-1 * z
-        b = self.linalg.solve(self.U, a)
-
-        # Compute prediction: f = mu + psi^T * Psi^-1 * (y - 1*mu)
-        # Use matmul for compatibility with different shapes
-        c = self.xp.matmul(self.psi.T, b)
-        f = self.mu + c
-
-        # Extract scalar value (handle different array backends)
-        if hasattr(f, 'item'):
-            return f.item()  # PyTorch tensor or single-element array
-        elif hasattr(f, 'get'):
-            return float(f.get()[0])  # CuPy array
-        else:
-            return float(f[0])  # NumPy array
+        """Kriging prediction mu + psi^T Psi^-1 (y - 1 mu) at normalised point(s) x."""
+        x, single = self._as_points(x, self.k)
+        f = self._predict(x, error=False)[0]
+        return float(f[0]) if single else f
 
     def predicterr_normalized(self, x):
-        """
-        Compute prediction uncertainty (standard deviation) at point x.
-
-        The Kriging variance formula:
-        s²(x) = sigma² * (1 - psi(x)^T * Psi^-1 * psi(x))
-
-        This quantifies the uncertainty of the prediction at x.
-        Uncertainty is low near training points and high in unexplored regions.
-
-        Args:
-            x: Point at which to compute uncertainty (in normalized coordinates)
-
-        Returns:
-            float: Prediction standard deviation at x
-
-        GPU acceleration benefits:
-        - Correlation vector computation
-        - Triangular solves for Psi^-1 * psi
-        """
-        # Compute correlation vector
-        # GPU Optimization: Vectorized computation instead of Python loop
-        x_gpu = self.xp.asarray(x)
-        diff = self.xp.abs(self.X - x_gpu)
-        weighted = self.theta * self.xp.power(diff, self.pl)
-        summed = self.xp.sum(weighted, axis=1, keepdims=True)
-        self.psi = self.xp.exp(-summed)
-
-        # Compute variance: s² = sigma² * (1 - psi^T * Psi^-1 * psi)
-        try:
-            # Solve Psi^-1 * psi using Cholesky factors (GPU-accelerated)
-            psi_inv_psi = self.linalg.solve(self.U, self.linalg.solve(self.U.T, self.psi))
-            # Use @ for matrix multiplication (works with both NumPy and PyTorch)
-            SSqr = self.SigmaSqr * (1 - self.psi.T @ psi_inv_psi)
-        except Exception as e:
-            print(f"Error in variance calculation:")
-            print(f"  U.shape: {self.U.shape}")
-            print(f"  SigmaSqr.shape: {self.SigmaSqr.shape}")
-            print(f"  psi.shape: {self.psi.shape}")
-            print(f"  Exception: {e}")
-            raise
-
-        # Extract scalar and compute standard deviation
-        SSqr = self.xp.abs(SSqr[0])
-        std_dev = self.xp.power(SSqr, 0.5)
-
-        # Convert to Python float (handle different backends)
-        if hasattr(std_dev, 'item'):
-            return std_dev.item()
-        elif hasattr(std_dev, 'get'):
-            return float(std_dev.get())
-        else:
-            return float(std_dev)
-
-    def regression_predicterr_normalized(self, x):
-        """
-        Compute prediction uncertainty for regularized Kriging.
-
-        Similar to predicterr_normalized() but accounts for the regularization term Lambda.
-        The variance formula becomes:
-        s²(x) = sigma² * (1 + Lambda - psi(x)^T * Psi^-1 * psi(x))
-
-        The Lambda term increases the baseline uncertainty, reflecting the additional
-        noise/regularization in the model.
-
-        Args:
-            x: Point at which to compute uncertainty (in normalized coordinates)
-
-        Returns:
-            float: Prediction standard deviation at x
-        """
-        # Compute correlation vector
-        # GPU Optimization: Vectorized computation instead of Python loop
-        x_gpu = self.xp.asarray(x)
-        diff = self.xp.abs(self.X - x_gpu)
-        weighted = self.theta * self.xp.power(diff, self.pl)
-        summed = self.xp.sum(weighted, axis=1, keepdims=True)
-        self.psi = self.xp.exp(-summed)
-
-        # Compute regularized variance: s² = sigma² * (1 + Lambda - psi^T * Psi^-1 * psi)
-        try:
-            psi_inv_psi = self.linalg.solve(self.U, self.linalg.solve(self.U.T, self.psi))
-            # Use @ for matrix multiplication (works with both NumPy and PyTorch)
-            SSqr = self.SigmaSqr * (1 + self.Lambda - self.psi.T @ psi_inv_psi)
-        except Exception as e:
-            print(f"Error in regression variance calculation: {e}")
-            raise
-
-        # Extract scalar and compute standard deviation
-        SSqr = self.xp.abs(SSqr[0])
-        std_dev = self.xp.power(SSqr, 0.5)
-
-        # Convert to Python float
-        if hasattr(std_dev, 'item'):
-            return std_dev.item()
-        elif hasattr(std_dev, 'get'):
-            return float(std_dev.get())
-        else:
-            return float(std_dev)
-
-    # =========================================================================
-    # BATCHED GPU OPERATIONS
-    # =========================================================================
-    # These methods evaluate multiple hyperparameter sets in parallel,
-    # dramatically reducing CPU-GPU synchronization overhead.
-    # Key insight: PyTorch's linalg.cholesky() supports batched input!
-    #
-    # Performance improvement:
-    # - Old: 30,000 CPU-GPU round trips during optimization
-    # - New: ~100 round trips (one per population)
-    # - Speedup: 100-300x reduction in sync overhead
-    # =========================================================================
-
-    def batch_compute_psi(self, theta_batch, pl_batch):
-        """
-        Compute correlation matrices for a batch of hyperparameter sets.
-
-        This is the core of the GPU optimization: instead of computing one
-        Psi matrix at a time (requiring CPU-GPU sync each time), we compute
-        all matrices for an entire optimizer population in one GPU call.
-
-        Args:
-            theta_batch: [batch_size, k] tensor of length scale parameters
-            pl_batch: [batch_size, k] tensor of power parameters
-
-        Returns:
-            Psi_batch: [batch_size, n, n] tensor of correlation matrices
-
-        GPU Memory: O(batch_size * n * n) - typically 300 * 100 * 100 * 4 bytes = 12MB
-        """
-        # Get batch size
-        batch_size = theta_batch.shape[0]
-
-        # self.distance has shape [n, n, k]
-        # theta_batch has shape [batch_size, k]
-        # We need to compute: exp(-sum_k(theta[b,k] * |distance[i,j,k]|^pl[b,k]))
-        # Result shape: [batch_size, n, n]
-
-        # Reshape for broadcasting:
-        # distance: [1, n, n, k] (add batch dimension)
-        # theta: [batch_size, 1, 1, k]
-        # pl: [batch_size, 1, 1, k]
-
-        if self._backend.backend_type == 'metal':
-            # PyTorch path
-            import torch
-
-            # Use no_grad for efficiency - we don't need gradients
-            with torch.no_grad():
-                # Ensure inputs are on the correct device
-                if not hasattr(theta_batch, 'device'):
-                    theta_batch = torch.tensor(theta_batch, dtype=torch.float32,
-                                              device=self._backend._torch_device)
-                if not hasattr(pl_batch, 'device'):
-                    pl_batch = torch.tensor(pl_batch, dtype=torch.float32,
-                                           device=self._backend._torch_device)
-
-                # Reshape distance for broadcasting: [1, n, n, k]
-                distance_expanded = self.distance.unsqueeze(0)
-
-                # Reshape hyperparameters: [batch_size, 1, 1, k]
-                theta_expanded = theta_batch.unsqueeze(1).unsqueeze(2)
-                pl_expanded = pl_batch.unsqueeze(1).unsqueeze(2)
-
-                # Compute: theta * |distance|^p, then sum over k, then exp(-)
-                # All operations are batched and parallelized on GPU
-                weighted = theta_expanded * torch.pow(distance_expanded, pl_expanded)
-                summed = torch.sum(weighted, dim=3)  # [batch_size, n, n]
-                Psi_batch = torch.exp(-summed)
-
-                # Add nugget for numerical stability (on diagonal only)
-                eye_batch = torch.eye(self.n, dtype=torch.float32,
-                                      device=self._backend._torch_device)
-                nugget = torch.finfo(torch.float32).eps
-                Psi_batch = Psi_batch + eye_batch.unsqueeze(0) * nugget
-
-        elif self._backend.backend_type == 'cuda':
-            # CuPy path
-            import cupy as cp
-
-            # Ensure inputs are on GPU
-            if not hasattr(theta_batch, 'device'):
-                theta_batch = cp.asarray(theta_batch)
-            if not hasattr(pl_batch, 'device'):
-                pl_batch = cp.asarray(pl_batch)
-
-            # Reshape for broadcasting
-            distance_expanded = self.distance[cp.newaxis, :, :, :]  # [1, n, n, k]
-            theta_expanded = theta_batch[:, cp.newaxis, cp.newaxis, :]  # [batch, 1, 1, k]
-            pl_expanded = pl_batch[:, cp.newaxis, cp.newaxis, :]
-
-            # Compute batched Psi
-            weighted = theta_expanded * cp.power(distance_expanded, pl_expanded)
-            summed = cp.sum(weighted, axis=3)
-            Psi_batch = cp.exp(-summed)
-
-            # Add nugget
-            eye_batch = cp.eye(self.n, dtype=cp.float32)
-            nugget = cp.finfo(cp.float32).eps
-            Psi_batch = Psi_batch + eye_batch[cp.newaxis, :, :] * nugget
-
-        else:
-            # CPU fallback (NumPy) - still benefits from vectorization
-            import numpy as np
-
-            theta_batch = np.asarray(theta_batch)
-            pl_batch = np.asarray(pl_batch)
-
-            # Convert distance to numpy if needed
-            distance_np = self._backend.to_cpu(self.distance)
-
-            distance_expanded = distance_np[np.newaxis, :, :, :]
-            theta_expanded = theta_batch[:, np.newaxis, np.newaxis, :]
-            pl_expanded = pl_batch[:, np.newaxis, np.newaxis, :]
-
-            weighted = theta_expanded * np.power(distance_expanded, pl_expanded)
-            summed = np.sum(weighted, axis=3)
-            Psi_batch = np.exp(-summed)
-
-            eye_batch = np.eye(self.n, dtype=np.float32)
-            nugget = np.finfo(np.float32).eps
-            Psi_batch = Psi_batch + eye_batch[np.newaxis, :, :] * nugget
-
-        return Psi_batch
-
-    def batch_neglikelihood(self, theta_batch, pl_batch):
-        """
-        Compute negative log-likelihood for a batch of hyperparameter sets.
-
-        This is the key performance optimization: evaluating an entire population
-        of hyperparameters in a single GPU call instead of 300 separate calls.
-
-        The optimization flow:
-        1. Compute all Psi matrices in parallel (batch_compute_psi)
-        2. Batched Cholesky decomposition (torch.linalg.cholesky handles batches!)
-        3. Batched triangular solves for mu and sigma
-        4. Return all likelihoods - only ONE GPU-CPU sync needed
-
-        Args:
-            theta_batch: [batch_size, k] length scale parameters
-            pl_batch: [batch_size, k] power parameters
-
-        Returns:
-            neg_log_likelihood: [batch_size] tensor of likelihood values
-                               Returns GPU tensor to avoid sync - caller decides when to sync
-
-        Performance:
-            Old: 300 candidates × 30,000 evals = 30,000 GPU-CPU syncs
-            New: 100 populations × 1 sync = 100 GPU-CPU syncs
-            Speedup: 300x reduction in sync overhead!
-        """
-        batch_size = theta_batch.shape[0] if hasattr(theta_batch, 'shape') else len(theta_batch)
-
-        # Step 1: Compute all Psi matrices [batch_size, n, n]
-        Psi_batch = self.batch_compute_psi(theta_batch, pl_batch)
-
-        if self._backend.backend_type == 'metal':
-            import torch
-
-            # Use no_grad context - we don't need gradients for hyperparameter optimization
-            # This reduces memory usage and speeds up computation
-            with torch.no_grad():
-                # Step 2: Batched Cholesky decomposition
-                # torch.linalg.cholesky supports batched input natively!
-                # This is where the GPU really shines - parallel Cholesky across all candidates
-                try:
-                    L_batch = torch.linalg.cholesky(Psi_batch)  # [batch, n, n] lower triangular
-                except RuntimeError as e:
-                    # If any matrix is not positive definite, return high penalty
-                    return torch.full((batch_size,), 10000.0,
-                                      device=self._backend._torch_device)
-
-                # Step 3: Compute log determinant for each matrix
-                # log|Psi| = 2 * sum(log(diag(L)))
-                diag_L = torch.diagonal(L_batch, dim1=1, dim2=2)  # [batch, n]
-                LnDetPsi = 2.0 * torch.sum(torch.log(torch.abs(diag_L)), dim=1)  # [batch]
-
-                # Step 4: Batched triangular solves for mu
-                # We need: mu = (1^T @ Psi^-1 @ y) / (1^T @ Psi^-1 @ 1)
-                # Using Cholesky: Psi^-1 = L^-T @ L^-1
-
-                # Prepare y and ones vectors for batched solve
-                # y shape: [n] -> [batch, n, 1] for batched solve
-                y_batch = self.y.unsqueeze(0).unsqueeze(2).expand(batch_size, -1, 1)
-                ones_batch = self.one.unsqueeze(0).unsqueeze(2).expand(batch_size, -1, 1)
-
-                # Solve L @ a = y  =>  a = L^-1 @ y
-                # Then L^T @ b = a  =>  b = Psi^-1 @ y
-                a_y = torch.linalg.solve_triangular(L_batch, y_batch, upper=False)
-                Psi_inv_y = torch.linalg.solve_triangular(L_batch.mT, a_y, upper=True)
-
-                # Same for ones vector
-                a_1 = torch.linalg.solve_triangular(L_batch, ones_batch, upper=False)
-                Psi_inv_1 = torch.linalg.solve_triangular(L_batch.mT, a_1, upper=True)
-
-                # mu = (1^T @ Psi^-1 @ y) / (1^T @ Psi^-1 @ 1)
-                # Shapes: [batch, 1, n] @ [batch, n, 1] = [batch, 1, 1]
-                ones_T = self.one.unsqueeze(0).unsqueeze(1)  # [1, 1, n] -> broadcasts to [batch, 1, n]
-                numerator = torch.bmm(ones_T.expand(batch_size, -1, -1), Psi_inv_y).squeeze(-1).squeeze(-1)
-                denominator = torch.bmm(ones_T.expand(batch_size, -1, -1), Psi_inv_1).squeeze(-1).squeeze(-1)
-                mu_batch = numerator / denominator  # [batch]
-
-                # Step 5: Compute SigmaSqr for each
-                # residual = y - 1*mu
-                # SigmaSqr = (residual^T @ Psi^-1 @ residual) / n
-                residual = self.y.unsqueeze(0) - self.one.unsqueeze(0) * mu_batch.unsqueeze(1)  # [batch, n]
-                residual_3d = residual.unsqueeze(2)  # [batch, n, 1]
-
-                # Solve for Psi^-1 @ residual
-                a_r = torch.linalg.solve_triangular(L_batch, residual_3d, upper=False)
-                Psi_inv_r = torch.linalg.solve_triangular(L_batch.mT, a_r, upper=True)
-
-                # SigmaSqr = (residual^T @ Psi^-1 @ residual) / n
-                SigmaSqr = torch.bmm(residual.unsqueeze(1), Psi_inv_r).squeeze(-1).squeeze(-1) / self.n
-
-                # Step 6: Compute negative log-likelihood
-                # NegLnLike = (n/2)*log(SigmaSqr) + (1/2)*LnDetPsi
-                NegLnLike = (self.n / 2.0) * torch.log(SigmaSqr) + 0.5 * LnDetPsi
-
-                return NegLnLike  # [batch] - stays on GPU!
-
-        elif self._backend.backend_type == 'cuda':
-            import cupy as cp
-
-            # CuPy batched Cholesky (via cuSOLVER)
-            try:
-                # CuPy doesn't have native batched Cholesky, so we loop
-                # But we still save on sync overhead by collecting all results
-                NegLnLike = cp.zeros(batch_size, dtype=cp.float32)
-
-                for i in range(batch_size):
-                    L = cp.linalg.cholesky(Psi_batch[i])
-                    LnDetPsi = 2.0 * cp.sum(cp.log(cp.abs(cp.diag(L))))
-
-                    # Triangular solves
-                    a = cp.linalg.solve(L, self.y)
-                    b = cp.linalg.solve(L.T, a)
-                    c = cp.linalg.solve(L, self.one)
-                    d = cp.linalg.solve(L.T, c)
-
-                    mu = self.one.dot(b) / self.one.dot(d)
-                    residual = self.y - self.one * mu
-                    e = cp.linalg.solve(L, residual)
-                    f = cp.linalg.solve(L.T, e)
-                    SigmaSqr = residual.dot(f) / self.n
-
-                    NegLnLike[i] = (self.n / 2.0) * cp.log(SigmaSqr) + 0.5 * LnDetPsi
-
-                return NegLnLike
-
-            except Exception:
-                return cp.full(batch_size, 10000.0, dtype=cp.float32)
-
-        else:
-            # CPU fallback
-            import numpy as np
-
-            NegLnLike = np.zeros(batch_size, dtype=np.float32)
-
-            # Convert to CPU ONCE outside the loop (not every iteration!)
-            y_cpu = self._backend.to_cpu(self.y)
-            one_cpu = self._backend.to_cpu(self.one)
-
-            for i in range(batch_size):
-                try:
-                    L = np.linalg.cholesky(Psi_batch[i])
-                    LnDetPsi = 2.0 * np.sum(np.log(np.abs(np.diag(L))))
-
-                    a = np.linalg.solve(L, y_cpu)
-                    b = np.linalg.solve(L.T, a)
-                    c = np.linalg.solve(L, one_cpu)
-                    d = np.linalg.solve(L.T, c)
-
-                    mu = one_cpu.dot(b) / one_cpu.dot(d)
-                    residual = y_cpu - one_cpu * mu
-                    e = np.linalg.solve(L, residual)
-                    f = np.linalg.solve(L.T, e)
-                    SigmaSqr = residual.dot(f) / self.n
-
-                    NegLnLike[i] = (self.n / 2.0) * np.log(SigmaSqr) + 0.5 * LnDetPsi
-                except Exception:
-                    NegLnLike[i] = 10000.0
-
-            return NegLnLike
+        """Standard error sqrt(sigma^2 (1 - psi^T Psi^-1 psi)) of the prediction at normalised point(s) x."""
+        x, single = self._as_points(x, self.k)
+        s = self._predict(x, mean=False)[1]
+        return float(s[0]) if single else s
+
+    def _incumbent(self):
+        """Best observed (normalised) response, the reference for expected improvement."""
+        return np.min(self.y)
+
+    def _improvement_error(self, x):
+        """Standard error used by expected improvement and error-based infill (re-interpolation for regression)."""
+        return self._predict(x, mean=False, improvement=True)[1]
+
+    def _log_expected_improvement(self, x):
+        """ln of the expected improvement at normalised points x (m, k)."""
+        return log_expected_improvement(*self._predict(x, improvement=True), self._incumbent())

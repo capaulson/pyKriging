@@ -1,105 +1,51 @@
-"""
-Utility Functions for pyKriging
-
-This module provides helper functions for:
-- Model persistence (save/load)
-- Data normalization
-- Cross-validation data splitting
-- Error metrics
-
-Author: chrispaulson
-"""
-
+"""Model persistence, normalisation and cross-validation helpers."""
 __author__ = 'chrispaulson'
-import dill as pickle
 import numpy as np
-from copy import deepcopy
 
 
 def norm(x):
-    """
-    Normalize array to range [0, 1].
+    """Scale an array to the range [0, 1]."""
+    x = x / (np.max(x) - np.min(x))
+    return x - np.min(x)
 
-    Args:
-        x: Input array
 
-    Returns:
-        Normalized array with values in [0, 1]
-    """
-    x =  ((x)/(max(x)-min(x)))
-    return x-min(x)
+def _by_reference(obj):
+    """pyKriging's own classes are pickled by reference (pyKriging/__init__ rebinds the submodule names samplingplan
+    and testfunctions to classes, which dill >= 0.3.6 cannot follow and would otherwise copy the classes by value)."""
+    if isinstance(obj, type) and obj.__module__.startswith('pyKriging.') and '<' not in obj.__qualname__:
+        return obj.__qualname__  # resolved by pickle's save_global through sys.modules
+    return NotImplemented
 
 
 def saveModel(model, filePath):
-    """
-    Save a trained Kriging model to disk.
-
-    Uses dill (extended pickle) for serialization, which handles
-    lambda functions and closures that standard pickle cannot.
-
-    Args:
-        model: Trained kriging model object
-        filePath: Path to save the model file
-
-    Note:
-        Models can be large due to stored matrices.
-        Consider saving only hyperparameters for very large models.
-    """
-    pickle.dump(model, open(filePath, 'w'), byref=True)
+    """Save a model with dill. Functions and classes defined in the calling script (such as a test function) are
+    stored by value with the globals they use, so the model also loads in another process."""
+    import io
+    import dill
+    getattr(getattr(dill, '_dill', None), 'stack', {}).clear()  # dill < 0.3.5 keeps per-dump state in a global
+    buffer = io.BytesIO()
+    pickler = dill.Pickler(buffer, recurse=True)
+    pickler.reducer_override = _by_reference
+    pickler.dump(model)
+    with open(filePath, 'wb') as fh:  # written only once pickling has succeeded
+        fh.write(buffer.getvalue())
 
 
 def loadModel(filePath):
-    """
-    Load a saved Kriging model from disk.
-
-    Args:
-        filePath: Path to the saved model file
-
-    Returns:
-        Loaded kriging model object, ready for predictions
-    """
-    return pickle.load(open(filePath,'r'))
+    """Load a model saved with saveModel()."""
+    import dill
+    with open(filePath, 'rb') as fh:
+        return dill.load(fh)
 
 
 def splitArrays(krigeModel, q=5):
-    """
-    Split model data into train/test sets for cross-validation.
-
-    Implements q-fold cross-validation by dividing the data into
-    q approximately equal parts. Each iteration yields one part
-    as test data and the remaining parts as training data.
-
-    Args:
-        krigeModel: Kriging model with X and y attributes
-        q: Number of folds (default 5)
-
-    Yields:
-        Tuple of (trainX, trainy, testX, testy) for each fold
-    """
-    ind = np.arange(krigeModel.n)
-    np.random.shuffle(ind)
-    test = np.array_split(ind,q)
-    for i in test:
-        newX = deepcopy(krigeModel.X)
-        newy = deepcopy(krigeModel.y)
-
-        testX = newX[i]
-        testy = newy[i]
-
-        trainX = np.delete(newX,i,axis=0)
-        trainy = np.delete(newy,i,axis=0)
-        yield trainX, trainy, testX, testy
+    """Yield (trainX, trainy, testX, testy) for q-fold cross-validation over the model's (normalised) data."""
+    folds = np.array_split(np.random.permutation(krigeModel.n), q)
+    for test in folds:
+        yield (np.delete(krigeModel.X, test, axis=0), np.delete(krigeModel.y, test, axis=0),
+               krigeModel.X[test], krigeModel.y[test])
 
 
 def mse(actual, predicted):
-    """
-    Calculate Mean Squared Error between actual and predicted values.
-
-    Args:
-        actual: True/observed value(s)
-        predicted: Model predicted value(s)
-
-    Returns:
-        Squared error (actual - predicted)^2
-    """
-    return ((actual - predicted) ** 2)
+    """Squared error (actual - predicted)^2."""
+    return (actual - predicted) ** 2
