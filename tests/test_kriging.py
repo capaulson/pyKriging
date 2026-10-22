@@ -243,7 +243,9 @@ def test_hyperparameters_without_a_positive_definite_correlation_matrix_raise():
     X, y = _data()
     model = kriging(X, y)
     with pytest.raises(Exception, match='bad params'):
-        model.update([1e-9, 1e-9, 2.0, 2.0])  # Psi ~ all ones
+        # p = 4 is not a valid kernel: here min eig(Psi) = -0.36. (A Psi singular only to round-off, such as
+        # theta ~ 0, passes or fails depending on the LAPACK library.)
+        model.update([1.0, 1.0, 4.0, 4.0])
 
 
 def test_default_hyperparameters_give_the_reference_likelihood():

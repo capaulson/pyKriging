@@ -164,7 +164,8 @@ class matrixops:
         in `work`, or None if Psi is not numerically positive definite. Psi is written to the lower triangle of the
         C-ordered work array, i.e. the upper triangle of its Fortran-ordered transpose, so LAPACK factorises in
         place. (The upper form also avoids a crash of dpotrf(lower=1) in the OpenBLAS of scipy 1.7 on arm64.)
-        Every fit uses this routine: near-singular matrices then pass or fail identically everywhere."""
+        Every fit uses this routine: near-singular matrices then pass or fail identically in every code path (though
+        not across LAPACK libraries)."""
         flat = work.reshape(-1)
         flat[self._lower] = r
         flat[::self.n + 1] = 1.0 + nugget
