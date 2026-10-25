@@ -1,228 +1,83 @@
-﻿
+"""
+Analytic benchmark functions for surrogate-model testing. Every method accepts one point (k,) or many
+points (m, k) and returns an (m,) array, except rastrigin/rosenbrock which take one point and return [f].
+"""
 import numpy as np
+
+
+def _points(X, k=None):
+    X = np.atleast_2d(np.asarray(X, dtype=float))
+    if k is not None and X.shape[1] != k:
+        raise ValueError(f'expected {k}-dimensional points, got {X.shape[1]}')
+    return X
+
+
+def _styblinski_tang(X):
+    return np.sum(X ** 4 - 16 * X ** 2 + 5 * X, axis=1) / 2.0
+
 
 class testfunctions():
     def linear(self, X):
-        try:
-            X.shape[1]
-        except:
-            X = np.array(X)
+        """f(x) = sum(x)."""
+        return _points(X).sum(axis=1)
 
-        if len(X.shape)<2:
-            X = np.array([X])
-        y = np.array([],dtype=float)
-        for i in range(X.shape[0]):
-            y = np.append(y, np.sum(X[i]))
-        return y
-
-    def squared(self, X, offset =.25):
-        try:
-            X.shape[1]
-        except:
-            X = np.array(X)
-
-        if len(X.shape)<2:
-            X = np.array([X])
-        offset = np.ones(X.shape[1])*offset
-        y = np.array([],dtype=float)
-        for i in range(X.shape[0]):
-            y = np.append(y, (np.sum((X[i]-offset)**2)**0.5))
-        return y
+    def squared(self, X, offset=.25):
+        """Euclidean distance from (offset, ..., offset)."""
+        return np.sum((_points(X) - offset) ** 2, axis=1) ** 0.5
 
     def cubed(self, X, offset=.25):
-        try:
-            X.shape[1]
-        except:
-            X = np.array(X)
-
-        if len(X.shape)<2:
-            X = np.array([X])
-        offset = np.ones(X.shape[1])*offset
-        y = np.array([],dtype=float)
-        for i in range(X.shape[0]):
-            y = np.append(y, (np.sum((X[i]-offset)**3)**(1/3.0)))
-        return y
+        """(sum((x - offset)^3))^(1/3); NaN where the sum is negative."""
+        return np.sum((_points(X) - offset) ** 3, axis=1) ** (1 / 3.0)
 
     def branin(self, X):
-        try:
-            X.shape[1]
-        except:
-            X = np.array([X])
-
-        if X.shape[1] != 2:
-            raise Exception
-        x = X[:,0]
-        y = X[:,1]
-        X1 = 15*x-5
-        X2 = 15*y
-        a = 1
-        b = 5.1/(4*np.pi**2)
-        c = 5/np.pi
-        d = 6
-        e = 10
-        ff = 1/(8*np.pi)
-        return (a*( X2 - b*X1**2 + c*X1 - d )**2 + e*(1-ff)*np.cos(X1) + e)+5*x
+        """Branin function on [0, 1]^2 (scaled to [-5, 10] x [0, 15]) plus 5 x_1, which leaves one global minimum."""
+        X = _points(X, 2)
+        x1, x2 = 15 * X[:, 0] - 5, 15 * X[:, 1]
+        return ((x2 - 5.1 / (4 * np.pi ** 2) * x1 ** 2 + 5 / np.pi * x1 - 6) ** 2
+                + 10 * (1 - 1 / (8 * np.pi)) * np.cos(x1) + 10) + 5 * X[:, 0]
 
     def branin_noise(self, X):
-        try:
-            X.shape[1]
-        except:
-            X = np.array([X])
+        """branin() plus N(0, 15^2) noise, for testing regression kriging."""
+        f = self.branin(X)
+        return f + np.random.standard_normal(f.shape) * 15
 
-        if X.shape[1] != 2:
-            raise Exception
-        x = X[:,0]
-        y = X[:,1]
-        X1 = 15*x-5
-        X2 = 15*y
-        a = 1
-        b = 5.1/(4*np.pi**2)
-        c = 5/np.pi
-        d = 6
-        e = 10
-        ff = 1/(8*np.pi)
-        noiseFree =  ((a*( X2 - b*X1**2 + c*X1 - d )**2 + e*(1-ff)*np.cos(X1) + e)+5*x)
-        withNoise=[]
-        for i in noiseFree:
-            withNoise.append(i + np.random.standard_normal()*15)
-        return np.array(withNoise)
+    def paulson(self, X, hz=5):
+        """0.5 sin(hz x_1) + 0.5 cos(hz x_2) on [0, 1]^2."""
+        X = _points(X, 2)
+        return .5 * np.sin(X[:, 0] * hz) + .5 * np.cos(X[:, 1] * hz)
 
-
-    def paulson(self,X,hz=5):
-        try:
-            X.shape[1]
-        except:
-            X = np.array([X])
-        if X.shape[1] != 2:
-            raise Exception
-        x = X[:,0]
-        y = X[:,1]
-        return .5*np.sin(x*hz) + .5*np.cos(y*hz)
-
-    def paulson1(self,X,hz=10):
-        try:
-            X.shape[1]
-        except:
-            X = np.array([X])
-        if X.shape[1] != 2:
-            raise Exception
-        x = X[:,0]
-        y = X[:,1]
-        return (np.sin(x*hz))/((x+.2)) + (np.cos(y*hz))/((y+.2))
+    def paulson1(self, X, hz=10):
+        """sin(hz x_1)/(x_1 + 0.2) + cos(hz x_2)/(x_2 + 0.2) on [0, 1]^2."""
+        X = _points(X, 2)
+        return np.sin(X[:, 0] * hz) / (X[:, 0] + .2) + np.cos(X[:, 1] * hz) / (X[:, 1] + .2)
 
     def runge(self, X, offset=0.0):
-        try:
-            X.shape[1]
-        except:
-            X = np.array(X)
+        """1 / (1 + |x - offset|^2)."""
+        return 1 / (1 + np.sum((_points(X) - offset) ** 2, axis=1))
 
-        if len(X.shape)<2:
-            X = np.array([X])
-        offset = np.ones(X.shape[1])*offset
-        y = np.array([],dtype=float)
-        for i in range(X.shape[0]):
-            y = np.append(y, ( 1 / (1 + np.sum((X[i]-offset)**2))))
-        return y
+    def stybtang(self, X):
+        """Styblinski-Tang function on [-5, 5]^d; minimum -39.166 d at x_i = -2.9035."""
+        return _styblinski_tang(_points(X))
 
-    def stybtang(self,X):
-        try:
-            X.shape[1]
-        except:
-            X = np.array([X])
-        d = X.shape[1]
-        y = []
-        for entry in X:
-            sum = 0
-            for i in range(d):
-                xi = entry[i]
-                new = np.power(xi,4) - 16*np.power(xi,2) + 5*xi
-                sum = sum + new
+    def stybtang_norm(self, X):
+        """Styblinski-Tang with inputs in [0, 1]^d."""
+        return _styblinski_tang(_points(X) * 10 - 5)
 
-            y.append(sum/2.)
-        return  np.array(y)
+    def curretal88exp(self, X):
+        """Currin et al. (1988) exponential function on [0, 1]^2."""
+        X = _points(X)
+        x1, x2 = X[:, 0], X[:, 1]
+        return (1 - np.exp(-1 / (2 * x2))) * (2300 * x1 ** 3 + 1900 * x1 ** 2 + 2092 * x1 + 60) / (100 * x1 ** 3 + 500 * x1 ** 2 + 4 * x1 + 20)
 
-    def stybtang_norm(self,X):
-        try:
-            X.shape[1]
-        except:
-            X = np.array([X])
-        X = (X *10)-5
-        d = X.shape[1]
-        y = []
-        for entry in X:
-            sum = 0
-            for i in range(d):
-                xi = entry[i]
-                new = np.power(xi,4) - 16*np.power(xi,2) + 5*xi
-                sum = sum + new
-
-            y.append(sum/2.)
-        return  np.array(y)
-
-    def curretal88exp(self,X):
-        try:
-            X.shape[1]
-        except:
-            X = np.array([X])
-        x1 = X[:,0]
-        x2 = X[:,1]
-
-        fact1 = 1 - np.exp(-1/(2*x2))
-        fact2 = 2300*np.power(x1,3) + 1900*np.power(x1,2) + 2092*x1 + 60
-        fact3 = 100*np.power(x1,3) + 500*np.power(x1,2) + 4*x1 + 20
-
-        return (fact1 * fact2/fact3)
-        
     def cosine(self, X):
-        try:
-            X.shape[1]
-        except:
-            X = np.array(X)
-
-        if len(X.shape)<2:
-            X = np.array([X])
-        y = np.array([],dtype=float)
-        for i in range(X.shape[0]):
-            y = np.append(y, np.cos(np.sum(X[i])))
-        return y
+        """cos(sum(x))."""
+        return np.cos(_points(X).sum(axis=1))
 
     def rastrigin(self, x):
-        """
-        2D Rastrigin function:
-            with global minima: 0 at x = [0, 0]
-        :param x:
-        :return:
-        """
-        y = [0.0] * 1  # Initialize array for objectives F(X)
-
-        y[0] = 20 + x[0] ** 2 + x[1] ** 2 - 10 * (np.cos(2 * np.pi * x[0]) + np.cos(2 * np.pi * x[1]))
-        return y
+        """2-D Rastrigin function at one point; global minimum 0 at (0, 0). Returns [f]."""
+        return [20 + x[0] ** 2 + x[1] ** 2 - 10 * (np.cos(2 * np.pi * x[0]) + np.cos(2 * np.pi * x[1]))]
 
     def rosenbrock(self, x):
-        '''
-        Rosenbrock function(Any order, usually 2D and 10D, sometimes larger dimension is tested)
-        with global minima: 0 at x = [1] * dimension
-        :param x:
-        :return:
-        '''
-        y = [0.0] * 1
-        function_sum = 0
-        for i in np.arange(0, len(x)-1):
-            function_sum += (1 - x[i]) ** 2 + 100 * ((x[i + 1] - x[i] ** 2) ** 2)
-        y[0] = function_sum
-        return y
-
-
-
-if __name__=='__main__':
-    a = testfunctions()
-    print(a.rastrigin([0, 0]))
-    print(a.rosenbrock([1] * 10))
-    print(a.squared([1,1,1]))
-    print(a.squared([[1,1,1],[2,2,2]]))
-    print(a.cubed([[1,1,1],[2,2,2]]))
-    print(a.stybtang([[1,1,1],[2,2,2]]))
-    print(a.curretal88exp([[1,1,1],[2,2,2]]))
-    print(a.cosine([[1,1,1],[2,2,2]]))
-    print(a.runge([[1,1,1],[2,2,2]]))
-
+        """Rosenbrock function at one point of any dimension; global minimum 0 at (1, ..., 1). Returns [f]."""
+        x = np.asarray(x, dtype=float)
+        return [float(np.sum((1 - x[:-1]) ** 2 + 100 * (x[1:] - x[:-1] ** 2) ** 2))]

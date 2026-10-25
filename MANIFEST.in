@@ -1,2 +1,3 @@
-include pyKriging/*.py
-recursive-include pyKriging/sampling_plans *
+# README.md and LICENSE are included automatically (pyproject.toml: readme, license-files).
+# Ship the whole test suite in the sdist: by default setuptools adds tests/test_*.py but not conftest.py.
+recursive-include tests *.py

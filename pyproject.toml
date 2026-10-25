@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyKriging"
+dynamic = ["version"]  # read from pyKriging/__init__.py (__version__)
+description = "Kriging (Gaussian-process) surrogate modelling: regression kriging, co-kriging, sampling plans and infill"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Chris Paulson", email = "capaulson@gmail.com"}]
+keywords = ["kriging", "gaussian process", "surrogate", "metamodel", "co-kriging", "design of experiments", "optimization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.20",
+    "scipy>=1.7",
+    "matplotlib>=3.5",
+    "dill>=0.3",
+]
+
+[project.optional-dependencies]
+gpu = ["torch>=2.0"]         # opt-in float64 CUDA likelihood for large problems: configure_gpu('cuda')
+gpu-nvidia = ["torch>=2.0"]  # alias of 'gpu' kept for earlier install instructions
+threads = ["threadpoolctl>=3.0"]  # faster predictions with OpenBLAS: one BLAS thread while predicting
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.1", "threadpoolctl>=3.0"]
+
+[project.urls]
+Homepage = "https://github.com/capaulson/pyKriging"
+Documentation = "https://github.com/capaulson/pyKriging#readme"
+Repository = "https://github.com/capaulson/pyKriging"
+Issues = "https://github.com/capaulson/pyKriging/issues"
+
+[tool.setuptools]
+packages = ["pyKriging"]
+
+[tool.setuptools.dynamic]
+version = {attr = "pyKriging.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["pyKriging"]
